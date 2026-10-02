@@ -173,42 +173,57 @@ export const ParticipantDashboardPage: React.FC = () => {
           <span className="text-[#111827] font-semibold">Team Overview</span>
         </div>
 
-        {/* 1. EVENT BANNER (Configured in Settings, placed prominently for participants) */}
+        {/* Ambient Hackathon Background Atmosphere if Banner is set */}
+        {eventConfig.eventBanner && (
+          <div
+            aria-hidden="true"
+            className="fixed inset-0 pointer-events-none opacity-[0.035] bg-center bg-cover -z-10 blur-2xl scale-105"
+            style={{ backgroundImage: `url(${eventConfig.eventBanner})` }}
+          />
+        )}
+
+        {/* 1. EVENT BANNER (Configured in Settings, Free Style • Full Image Display Without Cropping) */}
         {eventConfig.eventBanner ? (
-          <div className="mb-8 rounded-3xl overflow-hidden border border-[#E5E7EB] bg-white shadow-xs relative">
-            <div className="h-48 sm:h-64 w-full relative">
+          <div className="mb-8 rounded-2xl sm:rounded-3xl overflow-hidden border border-[#E5E7EB] bg-white shadow-xs">
+            <div className="w-full bg-[#0E3324]/5 p-2 sm:p-3 flex items-center justify-center">
               <img
                 src={eventConfig.eventBanner}
-                alt={eventConfig.eventName}
-                className="w-full h-full object-cover"
+                alt={eventConfig.eventName || 'Event Banner'}
+                className="w-full h-auto max-h-[560px] object-contain rounded-xl block mx-auto shadow-xs"
                 onError={(e) => {
                   (e.target as HTMLElement).style.display = 'none';
                 }}
               />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/35 to-transparent flex items-end p-6 sm:p-10">
-                <div className="text-white space-y-1.5">
-                  <div className="flex items-center gap-2.5">
-                    {eventConfig.clubLogo && (
-                      <img
-                        src={eventConfig.clubLogo}
-                        alt="Club Logo"
-                        className="w-9 h-9 rounded-xl bg-white/95 p-1 object-contain shadow-xs"
-                      />
-                    )}
-                    <span className="text-xs font-bold uppercase tracking-wider text-white/95 bg-white/20 backdrop-blur-xs px-3 py-1 rounded-full border border-white/25">
+            </div>
+            {/* Clean Event Subheader below the full uncropped banner */}
+            <div className="p-4 sm:p-5 bg-white border-t border-[#E5E7EB] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                {eventConfig.clubLogo && (
+                  <img
+                    src={eventConfig.clubLogo}
+                    alt="Club Logo"
+                    className="w-10 h-10 rounded-xl bg-white p-1 object-contain border border-[#E5E7EB] shadow-xs shrink-0"
+                  />
+                )}
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-[#164A36]">
                       {eventConfig.clubName}
                     </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#EEF5F0] text-[#164A36] font-semibold border border-[#D5E6DB]">
+                      Official Hackathon
+                    </span>
                   </div>
-                  <h2 className="text-2xl sm:text-4xl font-extrabold tracking-tight drop-shadow-sm">
+                  <h2 className="text-lg sm:text-xl font-bold text-[#111827] tracking-tight">
                     {eventConfig.eventName}
                   </h2>
-                  {eventConfig.tagline && (
-                    <p className="text-xs sm:text-sm text-white/85 max-w-2xl drop-shadow-xs">
-                      {eventConfig.tagline}
-                    </p>
-                  )}
                 </div>
               </div>
+              {eventConfig.tagline && (
+                <p className="text-xs text-[#667085] max-w-md font-medium sm:text-right">
+                  {eventConfig.tagline}
+                </p>
+              )}
             </div>
           </div>
         ) : (

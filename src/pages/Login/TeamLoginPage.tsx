@@ -6,7 +6,6 @@ import {
   KeyRound,
   Eye,
   EyeOff,
-  ShieldCheck,
   AlertCircle,
   HelpCircle,
   X,
@@ -205,17 +204,6 @@ export const TeamLoginPage: React.FC = () => {
               {isSubmitting ? 'Authenticating Team...' : 'LOGIN'}
             </Button>
           </form>
-        </div>
-
-        {/* Organizer Switch */}
-        <div className="text-center mt-6">
-          <Link
-            to="/admin/login"
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-[#667085] hover:text-[#164A36] transition-colors"
-          >
-            <ShieldCheck className="w-3.5 h-3.5" />
-            <span>Are you a hackathon organizer? Switch to Admin Login</span>
-          </Link>
         </div>
       </div>
 

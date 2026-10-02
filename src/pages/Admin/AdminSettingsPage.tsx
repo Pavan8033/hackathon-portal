@@ -105,11 +105,45 @@ export const AdminSettingsPage: React.FC = () => {
   const handleBannerUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
     const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setEventBanner(reader.result);
-      }
+    reader.onload = (event) => {
+      const result = event.target?.result;
+      if (typeof result !== 'string') return;
+
+      // Ensure full free-style aspect ratio is preserved with high quality
+      const img = new Image();
+      img.onload = () => {
+        const maxDimension = 2048;
+        let { width, height } = img;
+
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            const mimeType = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+            const optimizedDataUrl = canvas.toDataURL(mimeType, 0.92);
+            setEventBanner(optimizedDataUrl);
+            return;
+          }
+        }
+        setEventBanner(result);
+      };
+      img.onerror = () => {
+        setEventBanner(result);
+      };
+      img.src = result;
     };
     reader.readAsDataURL(file);
   };
@@ -691,16 +725,21 @@ export const AdminSettingsPage: React.FC = () => {
               </div>
 
               {eventBanner && (
-                <div className="mt-2 p-2 rounded-xl border border-[#E5E7EB] bg-[#F7F5EF] flex flex-col gap-1 max-w-sm">
-                  <img
-                    src={eventBanner}
-                    alt="Banner Preview"
-                    className="w-full h-20 object-cover rounded-lg bg-white border border-gray-200"
-                    onError={(e) => {
-                      (e.target as HTMLElement).style.display = 'none';
-                    }}
-                  />
-                  <span className="text-[10px] text-[#667085]">Banner Preview</span>
+                <div className="mt-3 p-3 rounded-2xl border border-[#E5E7EB] bg-[#F7F5EF] flex flex-col gap-1.5 w-full max-w-xl">
+                  <div className="flex items-center justify-between text-xs font-semibold text-[#111827]">
+                    <span>Banner Preview (Free Style • Full Image)</span>
+                    <span className="text-[10px] text-[#667085]">100% visible • Zero cropping</span>
+                  </div>
+                  <div className="w-full bg-white rounded-xl border border-gray-200 overflow-hidden p-1.5 flex items-center justify-center">
+                    <img
+                      src={eventBanner}
+                      alt="Banner Preview"
+                      className="w-full h-auto max-h-72 object-contain rounded-lg mx-auto block"
+                      onError={(e) => {
+                        (e.target as HTMLElement).style.display = 'none';
+                      }}
+                    />
+                  </div>
                 </div>
               )}
             </div>

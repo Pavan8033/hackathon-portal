@@ -12,13 +12,13 @@ export const HeroSection: React.FC = () => {
   return (
     <section className="relative pt-12 pb-16 md:pt-20 md:pb-24 overflow-hidden">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Optional Event Banner Header */}
+        {/* Optional Event Banner Header (Free Style • Full Image Display) */}
         {eventConfig.eventBanner && (
-          <div className="mb-8 rounded-2xl overflow-hidden border border-[#E5E7EB] shadow-md max-h-56 w-full">
+          <div className="mb-8 rounded-2xl sm:rounded-3xl overflow-hidden border border-[#E5E7EB] bg-white shadow-md p-2 sm:p-3">
             <img
               src={eventConfig.eventBanner}
               alt={eventConfig.eventName || 'Event Banner'}
-              className="w-full h-full object-cover max-h-56"
+              className="w-full h-auto max-h-[550px] object-contain rounded-xl block mx-auto"
             />
           </div>
         )}

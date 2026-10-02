@@ -27,6 +27,7 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { ProblemService } from '../../services/problemService';
 import { SelectionService } from '../../services/selectionService';
 import { useAuth } from '../../context/AuthContext';
+import { useEvent } from '../../context/EventContext';
 import {
   getDocumentTypeInfo,
   formatSelectionDateTime,
@@ -36,6 +37,7 @@ import type { ProblemRecord, TeamSelection } from '../../types';
 
 export const ProblemStatementsPage: React.FC = () => {
   const { team } = useAuth();
+  const { eventConfig } = useEvent();
 
   const [problems, setProblems] = useState<ProblemRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -189,7 +191,16 @@ export const ProblemStatementsPage: React.FC = () => {
     const formattedSelectionTime = formatSelectionDateTime(selectedTime);
 
     return (
-      <div className="min-h-screen flex flex-col bg-[#F7F5EF]">
+      <div className="min-h-screen flex flex-col bg-[#F7F5EF] relative">
+        {/* Ambient Hackathon Background Atmosphere if Banner is set */}
+        {eventConfig.eventBanner && (
+          <div
+            aria-hidden="true"
+            className="fixed inset-0 pointer-events-none opacity-[0.035] bg-center bg-cover -z-10 blur-2xl scale-105"
+            style={{ backgroundImage: `url(${eventConfig.eventBanner})` }}
+          />
+        )}
+
         <Navbar />
 
         <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-10">
@@ -412,7 +423,16 @@ export const ProblemStatementsPage: React.FC = () => {
   // Show standard challenge catalog WITHOUT any separate "Featured Challenge" banner.
   // =========================================================================
   return (
-    <div className="min-h-screen flex flex-col bg-[#F7F5EF]">
+    <div className="min-h-screen flex flex-col bg-[#F7F5EF] relative">
+      {/* Ambient Hackathon Background Atmosphere if Banner is set */}
+      {eventConfig.eventBanner && (
+        <div
+          aria-hidden="true"
+          className="fixed inset-0 pointer-events-none opacity-[0.035] bg-center bg-cover -z-10 blur-2xl scale-105"
+          style={{ backgroundImage: `url(${eventConfig.eventBanner})` }}
+        />
+      )}
+
       <Navbar />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-10">

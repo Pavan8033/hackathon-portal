@@ -14,12 +14,14 @@ import { Footer } from '../../components/layout/Footer';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { useAuth } from '../../context/AuthContext';
+import { useEvent } from '../../context/EventContext';
 import { AuthService } from '../../services/authService';
 import { TeamService } from '../../services/teamService';
 import type { TeamRecord } from '../../types';
 
 export const TeamProfilePage: React.FC = () => {
   const { team } = useAuth();
+  const { eventConfig } = useEvent();
   const [teamDetails, setTeamDetails] = useState<TeamRecord | null>(team || null);
 
   useEffect(() => {
@@ -111,7 +113,16 @@ export const TeamProfilePage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#F7F5EF]">
+    <div className="min-h-screen flex flex-col bg-[#F7F5EF] relative">
+      {/* Ambient Hackathon Background Atmosphere if Banner is set */}
+      {eventConfig.eventBanner && (
+        <div
+          aria-hidden="true"
+          className="fixed inset-0 pointer-events-none opacity-[0.035] bg-center bg-cover -z-10 blur-2xl scale-105"
+          style={{ backgroundImage: `url(${eventConfig.eventBanner})` }}
+        />
+      )}
+
       <Navbar />
 
       <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-10">

@@ -1,3 +1,5 @@
+import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
+import { db, isFirebaseConfigured } from '../lib/firebase';
 import type { EventConfig } from '../types';
 import { SettingsService } from './settingsService';
 import { TeamService } from './teamService';
@@ -26,6 +28,7 @@ export const DEFAULT_EVENT_CONFIG: EventConfig = {
 
 export class EventService {
   private static memoryEventConfig: EventConfig | null = null;
+  private static isListeningToRemote: boolean = false;
 
   /**
    * Get the active event configuration
@@ -54,6 +57,34 @@ export class EventService {
   }
 
   /**
+   * Fetch latest event config from Firestore
+   */
+  public static async fetchRemoteEventConfig(): Promise<EventConfig> {
+    const local = this.getEventConfig();
+    if (isFirebaseConfigured && db) {
+      try {
+        const docRef = doc(db, 'settings', 'eventConfig');
+        const snap = await getDoc(docRef);
+        if (snap.exists()) {
+          const remote = snap.data() as Partial<EventConfig>;
+          const merged: EventConfig = {
+            ...DEFAULT_EVENT_CONFIG,
+            ...local,
+            ...remote,
+          };
+          this.memoryEventConfig = merged;
+          localStorage.setItem(EVENT_STORAGE_KEY, JSON.stringify(merged));
+          window.dispatchEvent(new CustomEvent(EVENT_CHANGE_EVENT, { detail: merged }));
+          return merged;
+        }
+      } catch (err) {
+        console.warn('[EventService] Firestore get error:', err);
+      }
+    }
+    return local;
+  }
+
+  /**
    * Update event configuration
    */
   public static async updateEventConfig(
@@ -76,6 +107,16 @@ export class EventService {
       window.dispatchEvent(new CustomEvent(EVENT_CHANGE_EVENT, { detail: updated }));
     } catch (err) {
       console.warn('[EventService] Storage error:', err);
+    }
+
+    // Persist to Firestore
+    if (isFirebaseConfigured && db) {
+      try {
+        const docRef = doc(db, 'settings', 'eventConfig');
+        await setDoc(docRef, updated, { merge: true });
+      } catch (err) {
+        console.warn('[EventService] Firestore update error:', err);
+      }
     }
 
     // Synchronize selection limit with portal settings
@@ -109,11 +150,45 @@ export class EventService {
       }
     });
 
+    // Remote Firestore Realtime Listener
+    let unsubscribeFirestore: (() => void) | undefined;
+    if (isFirebaseConfigured && db && !this.isListeningToRemote) {
+      try {
+        this.isListeningToRemote = true;
+        const docRef = doc(db, 'settings', 'eventConfig');
+        unsubscribeFirestore = onSnapshot(docRef, (snap) => {
+          if (snap.exists()) {
+            const remote = snap.data() as Partial<EventConfig>;
+            const current = this.getEventConfig();
+            const merged: EventConfig = {
+              ...DEFAULT_EVENT_CONFIG,
+              ...current,
+              ...remote,
+            };
+            this.memoryEventConfig = merged;
+            try {
+              localStorage.setItem(EVENT_STORAGE_KEY, JSON.stringify(merged));
+            } catch {
+              // ignore
+            }
+            callback(merged);
+          }
+        }, (err) => {
+          console.warn('[EventService] Realtime listener error:', err);
+        });
+      } catch {
+        // ignore
+      }
+    }
+
     // Invoke immediately
     callback(this.getEventConfig());
 
     return () => {
       window.removeEventListener(EVENT_CHANGE_EVENT, handler);
+      if (unsubscribeFirestore) {
+        unsubscribeFirestore();
+      }
     };
   }
 
