@@ -5,6 +5,8 @@ import type {
   ParsedProblemRow,
   ImportProblemSummary,
   ProblemDifficulty,
+  ParsedCredentialRow,
+  ImportCredentialSummary,
 } from '../types';
 
 export interface ParseOptions {
@@ -42,9 +44,24 @@ export class FileParserService {
     } else if (fileExtension === 'xlsx' || fileExtension === 'xls') {
       const buffer = await file.arrayBuffer();
       const workbook = XLSX.read(buffer, { type: 'array' });
-      const firstSheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[firstSheetName];
-      rawRows = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { defval: '' });
+      let sheetToUse = workbook.Sheets[workbook.SheetNames[0]];
+      const targetSheetName = workbook.SheetNames.find((s) => {
+        const lower = s.toLowerCase();
+        return lower.includes('team') || lower.includes('participant') || lower.includes('roster');
+      });
+      if (targetSheetName && workbook.Sheets[targetSheetName]) {
+        sheetToUse = workbook.Sheets[targetSheetName];
+      } else {
+        for (const s of workbook.SheetNames) {
+          const ws = workbook.Sheets[s];
+          const testRows = XLSX.utils.sheet_to_json(ws);
+          if (testRows.length > 0) {
+            sheetToUse = ws;
+            break;
+          }
+        }
+      }
+      rawRows = XLSX.utils.sheet_to_json<Record<string, any>>(sheetToUse, { defval: '' });
     } else if (fileExtension === 'pdf') {
       const buffer = await file.arrayBuffer();
       rawRows = await this.extractParticipantRowsFromPDF(buffer, file.name);
@@ -89,6 +106,138 @@ export class FileParserService {
     return this.validateAndNormalizeProblemRows(rawRows, options);
   }
 
+  // ==========================================================================
+  // 3. CREDENTIALS PARSER (.xlsx, .xls, .csv, .txt)
+  // Format: TEAM ID (username) & REGISTRATION NUMBER (password)
+  // ==========================================================================
+  public static async parseCredentialsFile(
+    file: File
+  ): Promise<ImportCredentialSummary> {
+    const fileExtension = file.name.split('.').pop()?.toLowerCase();
+
+    if (!fileExtension || !['xlsx', 'xls', 'csv', 'txt'].includes(fileExtension)) {
+      throw new Error(`Unsupported credentials file type: .${fileExtension}. Please upload .xlsx, .xls, or .csv`);
+    }
+
+    let rawRows: Record<string, any>[] = [];
+
+    if (fileExtension === 'csv' || fileExtension === 'txt') {
+      const text = await file.text();
+      const workbook = XLSX.read(text, { type: 'string' });
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheetName];
+      rawRows = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { defval: '' });
+    } else {
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: 'array' });
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheetName];
+      rawRows = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { defval: '' });
+    }
+
+    return this.validateAndNormalizeCredentialRows(rawRows);
+  }
+
+  private static validateAndNormalizeCredentialRows(
+    rows: Record<string, any>[]
+  ): ImportCredentialSummary {
+    const validCredentials: ParsedCredentialRow[] = [];
+    const invalidCredentials: ParsedCredentialRow[] = [];
+    const duplicateIds: string[] = [];
+    const seenIdsInFile = new Set<string>();
+
+    rows.forEach((row, idx) => {
+      const rowNumber = idx + 2;
+      const errors: string[] = [];
+
+      let teamId = '';
+      let registrationNumber = '';
+
+      const entries = Object.entries(row);
+
+      for (const [rawKey, rawVal] of entries) {
+        const key = this.normalizeKey(rawKey);
+        let val = String(rawVal ?? '').trim();
+        if (!val) continue;
+
+        // Clean float .0 from Excel numbers
+        if (val.endsWith('.0') && /^\d+\.0$/.test(val)) {
+          val = val.slice(0, -2);
+        }
+
+        if (this.isTeamIdKey(key)) {
+          teamId = val;
+        } else if (this.isRegKey(key) || this.isPasswordKey(key)) {
+          registrationNumber = val;
+        }
+      }
+
+      // Positional fallback if headers were ambiguous and at least 2 non-empty values exist
+      if ((!teamId || !registrationNumber) && entries.length >= 2) {
+        const nonNullEntries = entries.filter(([_, v]) => String(v ?? '').trim() !== '');
+        if (nonNullEntries.length >= 2) {
+          if (!teamId) {
+            let v0 = String(nonNullEntries[0][1] ?? '').trim();
+            if (v0.endsWith('.0') && /^\d+\.0$/.test(v0)) v0 = v0.slice(0, -2);
+            teamId = v0;
+          }
+          if (!registrationNumber) {
+            let v1 = String(nonNullEntries[1][1] ?? '').trim();
+            if (v1.endsWith('.0') && /^\d+\.0$/.test(v1)) v1 = v1.slice(0, -2);
+            registrationNumber = v1;
+          }
+        }
+      }
+
+      // Skip completely empty row
+      if (!teamId && !registrationNumber) {
+        return;
+      }
+
+      // Validations
+      if (!teamId) {
+        errors.push(`Row ${rowNumber}: Missing Team ID (Username)`);
+      }
+      if (!registrationNumber) {
+        errors.push(`Row ${rowNumber}: Missing Registration Number (Password)`);
+      }
+
+      if (teamId) {
+        const normalizedId = teamId.toLowerCase();
+        if (seenIdsInFile.has(normalizedId)) {
+          errors.push(`Row ${rowNumber}: Duplicate Team ID "${teamId}" in uploaded file`);
+          duplicateIds.push(teamId);
+        } else {
+          seenIdsInFile.add(normalizedId);
+        }
+      }
+
+      const parsed: ParsedCredentialRow = {
+        rowNumber,
+        teamId,
+        registrationNumber,
+        isValid: errors.length === 0,
+        errors,
+      };
+
+      if (parsed.isValid) {
+        validCredentials.push(parsed);
+      } else {
+        invalidCredentials.push(parsed);
+      }
+    });
+
+    return {
+      totalRows: rows.length,
+      validCount: validCredentials.length,
+      invalidCount: invalidCredentials.length,
+      duplicateCount: duplicateIds.length,
+      validCredentials,
+      invalidCredentials,
+      duplicateIds,
+    };
+  }
+
   /**
    * Normalize flexible column headers (e.g. "Team ID", "team_id", "Username")
    */
@@ -96,12 +245,148 @@ export class FileParserService {
     return key.toLowerCase().replace(/[^a-z0-9]/g, '');
   }
 
+  private static isTeamIdKey(key: string): boolean {
+    return (
+      key === 'teamid' ||
+      key === 'id' ||
+      key === 'teamcode' ||
+      key === 'username' ||
+      key === 'userid' ||
+      key === 'user' ||
+      key === 'loginid' ||
+      key === 'teamidentifier'
+    );
+  }
+
+  private static isTeamNameKey(key: string): boolean {
+    return (
+      key === 'teamname' ||
+      key === 'team' ||
+      key === 'name' ||
+      key === 'groupname' ||
+      key === 'projectteam'
+    );
+  }
+
+  private static isPasswordKey(key: string): boolean {
+    return (
+      key === 'password' ||
+      key === 'pass' ||
+      key === 'pwd' ||
+      key === 'teampassword' ||
+      key === 'teampass' ||
+      key === 'teamkey' ||
+      key === 'credential' ||
+      key === 'secret' ||
+      key === 'loginpassword'
+    );
+  }
+
+  private static isTeamLeadKey(key: string): boolean {
+    return (
+      key === 'teamleadname' ||
+      key === 'teamlead' ||
+      key === 'teamleader' ||
+      key === 'teamleadername' ||
+      key === 'leadname' ||
+      key === 'leader' ||
+      key === 'leadername' ||
+      key === 'lead' ||
+      key === 'captain'
+    );
+  }
+
+  private static isRegKey(key: string): boolean {
+    return (
+      key.includes('registration') ||
+      key.includes('regno') ||
+      key.includes('regnumber') ||
+      key.includes('regnum') ||
+      key.includes('leadreg') ||
+      key === 'reg' ||
+      key === 'regno' ||
+      key.includes('rollno') ||
+      key.includes('rollnum') ||
+      key.includes('rollnumber') ||
+      key.includes('hallticket') ||
+      key === 'htno' ||
+      key === 'usn' ||
+      key === 'pin' ||
+      key.includes('studentid') ||
+      key.includes('studentno')
+    );
+  }
+
+  private static isMembersKey(key: string): boolean {
+    if (
+      key.includes('email') ||
+      key.includes('mail') ||
+      key.includes('phone') ||
+      key.includes('mobile') ||
+      key.includes('contact') ||
+      key.includes('reg') ||
+      key.includes('roll') ||
+      key.includes('type') ||
+      key.includes('track') ||
+      key.includes('dept') ||
+      key.includes('gender') ||
+      key.includes('year') ||
+      key.includes('hostel') ||
+      key.includes('utr') ||
+      key.includes('amount') ||
+      key.includes('fee') ||
+      key.includes('status')
+    ) {
+      return false;
+    }
+    return (
+      key.includes('member') ||
+      key === 'teammembers' ||
+      key === 'participants' ||
+      key === 'roster' ||
+      key === 'students'
+    );
+  }
+
+  private static isEmailKey(key: string): boolean {
+    return (
+      key === 'email' ||
+      key.includes('leademail') ||
+      key.includes('contactemail') ||
+      key === 'memberemail' ||
+      key === 'mail'
+    );
+  }
+
+  private static isPhoneKey(key: string): boolean {
+    return (
+      key === 'phone' ||
+      key.includes('contact') ||
+      key.includes('mobile') ||
+      key === 'mobilenumber' ||
+      key === 'cell' ||
+      key === 'whatsapp'
+    );
+  }
+
+  private static isCollegeKey(key: string): boolean {
+    return (
+      key === 'college' ||
+      key === 'university' ||
+      key === 'institution' ||
+      key === 'institute' ||
+      key === 'department' ||
+      key === 'dept' ||
+      key === 'school'
+    );
+  }
+
   /**
    * Validate and map raw imported participant rows
    */
   private static validateAndNormalizeParticipantRows(
     rows: Record<string, any>[],
-    options: ParseOptions
+    _options: ParseOptions
   ): ImportValidationSummary {
     const validTeams: ParsedTeamRow[] = [];
     const invalidTeams: ParsedTeamRow[] = [];
@@ -109,14 +394,101 @@ export class FileParserService {
 
     const seenIdsInFile = new Set<string>();
     const seenNamesInFile = new Set<string>();
-    const existingNames = new Set(
-      (options.existingTeamNames || []).map((n) => n.trim().toLowerCase())
-    );
-    const existingIds = new Set(
-      (options.existingTeamIds || []).map((id) => id.trim().toLowerCase())
-    );
 
-    rows.forEach((row, idx) => {
+    // Check if the uploaded rows represent a multi-row export (e.g. one row per member with Member Type, etc.)
+    const sampleKeys = rows.length > 0 ? Object.keys(rows[0]).map((k) => this.normalizeKey(k)) : [];
+    const isMultiRowExport = sampleKeys.includes('membertype') || sampleKeys.includes('membername');
+
+    let processedRows: Record<string, any>[] = rows;
+
+    if (isMultiRowExport) {
+      const teamGroups = new Map<string, {
+        teamId: string;
+        teamName: string;
+        leadName: string;
+        leadReg: string;
+        password: string;
+        email: string;
+        phone: string;
+        college: string;
+        members: string[];
+      }>();
+
+      rows.forEach((r, idx) => {
+        let tId = '';
+        let tName = '';
+        let mType = '';
+        let mName = '';
+        let mReg = '';
+        let mPass = '';
+        let mEmail = '';
+        let mPhone = '';
+        let college = '';
+
+        for (const [k, v] of Object.entries(r)) {
+          const nk = this.normalizeKey(k);
+          const val = String(v ?? '').trim();
+          if (!val) continue;
+
+          if (this.isTeamIdKey(nk)) tId = val;
+          else if (this.isTeamNameKey(nk)) tName = val;
+          else if (nk === 'membertype') mType = val.toLowerCase();
+          else if (nk === 'membername' || nk === 'studentname') mName = val;
+          else if (this.isRegKey(nk)) mReg = val;
+          else if (this.isPasswordKey(nk)) mPass = val;
+          else if (this.isEmailKey(nk)) mEmail = val;
+          else if (this.isPhoneKey(nk)) mPhone = val;
+          else if (this.isCollegeKey(nk)) college = val;
+        }
+
+        const groupKey = tId || tName || `row-${idx}`;
+        if (!teamGroups.has(groupKey)) {
+          teamGroups.set(groupKey, {
+            teamId: tId,
+            teamName: tName,
+            leadName: '',
+            leadReg: '',
+            password: '',
+            email: '',
+            phone: '',
+            college: '',
+            members: [],
+          });
+        }
+
+        const group = teamGroups.get(groupKey)!;
+        if (tName && !group.teamName) group.teamName = tName;
+        if (tId && !group.teamId) group.teamId = tId;
+
+        const isLead = mType.includes('lead') || group.members.length === 0;
+        if (isLead) {
+          if (!group.leadName && mName) group.leadName = mName;
+          if (!group.leadReg && mReg) group.leadReg = mReg;
+          if (!group.password && (mPass || mReg)) group.password = mPass || mReg;
+          if (!group.email && mEmail) group.email = mEmail;
+          if (!group.phone && mPhone) group.phone = mPhone;
+          if (!group.college && college) group.college = college;
+        }
+
+        if (mName && !group.members.includes(mName)) {
+          group.members.push(mName);
+        }
+      });
+
+      processedRows = Array.from(teamGroups.values()).map((g) => ({
+        'Team ID': g.teamId,
+        'Team Name': g.teamName,
+        'Team Lead': g.leadName || (g.members[0] || 'Team Lead'),
+        'Registration No.': g.leadReg,
+        'Password': g.password || g.leadReg,
+        'Members': g.members.join(', '),
+        'Email': g.email,
+        'Phone': g.phone,
+        'College': g.college,
+      }));
+    }
+
+    processedRows.forEach((row, idx) => {
       const rowNumber = idx + 2;
       const errors: string[] = [];
 
@@ -132,57 +504,40 @@ export class FileParserService {
 
       for (const [rawKey, rawVal] of Object.entries(row)) {
         const key = this.normalizeKey(rawKey);
-        const val = String(rawVal || '').trim();
+        let val = String(rawVal ?? '').trim();
         if (!val) continue;
 
-        if (
-          key === 'teamid' ||
-          key === 'id' ||
-          key === 'teamcode' ||
-          key === 'username' ||
-          key === 'userid' ||
-          key === 'user'
-        ) {
+        // Strip trailing .0 if parsed as float from Excel
+        if (val.endsWith('.0') && /^\d+\.0$/.test(val)) {
+          val = val.slice(0, -2);
+        }
+
+        if (this.isTeamIdKey(key)) {
           teamId = val;
-        } else if (key === 'teamname' || key === 'team' || key === 'name') {
+        } else if (this.isTeamNameKey(key)) {
           teamName = val;
-        } else if (
-          key === 'password' ||
-          key === 'pass' ||
-          key === 'pwd' ||
-          key === 'teampassword' ||
-          key === 'teampass' ||
-          key === 'teamkey' ||
-          key === 'credential'
-        ) {
+        } else if (this.isPasswordKey(key)) {
           password = val;
-        } else if (
-          key === 'teamleadname' ||
-          key === 'teamlead' ||
-          key === 'leadname' ||
-          key === 'leader' ||
-          key === 'leadername'
-        ) {
+        } else if (this.isTeamLeadKey(key)) {
           teamLeadName = val;
-        } else if (
-          key === 'teamleadregistrationnumber' ||
-          key === 'leadregno' ||
-          key === 'registrationnumber' ||
-          key === 'regno' ||
-          key === 'regnumber' ||
-          key === 'leadreg'
-        ) {
+        } else if (this.isRegKey(key)) {
           teamLeadReg = val;
-        } else if (key.includes('member') || key === 'teammembers') {
+        } else if (this.isEmailKey(key)) {
+          email = val;
+        } else if (this.isPhoneKey(key)) {
+          phone = val;
+        } else if (this.isCollegeKey(key)) {
+          college = val;
+        } else if (this.isMembersKey(key)) {
           const splitMembers = val.split(/[,;\n]/).map((m) => m.trim()).filter(Boolean);
           members.push(...splitMembers);
-        } else if (key === 'email' || key === 'leademail' || key === 'contactemail') {
-          email = val;
-        } else if (key === 'phone' || key === 'contact' || key === 'mobile') {
-          phone = val;
-        } else if (key === 'college' || key === 'university' || key === 'institution') {
-          college = val;
         }
+      }
+
+      // If teamId is missing, auto-fallback to teamName or generated ID
+      // Skip completely empty row in Excel
+      if (!teamId && !teamName && !teamLeadName && members.length === 0 && !teamLeadReg && !password) {
+        return;
       }
 
       // If teamId is missing, auto-fallback to teamName or generated ID
@@ -192,20 +547,20 @@ export class FileParserService {
         teamName = `Team ${teamId}`;
       }
 
-      // If password column was empty, check if teamLeadReg was provided
-      if (!password && teamLeadReg) {
-        password = teamLeadReg;
-      }
-      if (!teamLeadReg && password) {
-        teamLeadReg = password;
-      }
+      // Credential resolution:
+      // Guarantee password is valid by falling back through Registration No., Team ID, or generated default
+      password = (
+        password ||
+        teamLeadReg ||
+        teamId ||
+        (teamName ? `${teamName.replace(/[^a-zA-Z0-9]/g, '')}@123` : `TeamPass@${rowNumber}`)
+      ).trim();
+
+      teamLeadReg = (teamLeadReg || password || teamId).trim();
 
       // Validation
       if (!teamId && !teamName) {
         errors.push(`Row ${rowNumber}: Missing Team ID and Team Name`);
-      }
-      if (!password) {
-        errors.push(`Row ${rowNumber}: Missing Password credential for team`);
       }
 
       if (!teamLeadName) {
@@ -214,20 +569,17 @@ export class FileParserService {
 
       if (members.length === 0 && teamLeadName) {
         members.push(teamLeadName);
-      } else if (teamLeadName && !members.includes(teamLeadName)) {
+      } else if (teamLeadName && !members.some((m) => m.toLowerCase() === teamLeadName.toLowerCase())) {
         members.unshift(teamLeadName);
       }
 
-      // Check duplicates
+      // Check duplicates within the uploaded file
       const normalizedId = teamId.toLowerCase();
       const normalizedName = teamName.toLowerCase();
 
       if (teamId) {
         if (seenIdsInFile.has(normalizedId)) {
           errors.push(`Row ${rowNumber}: Duplicate Team ID "${teamId}" in uploaded file`);
-          duplicateNames.push(teamId);
-        } else if (existingIds.has(normalizedId)) {
-          errors.push(`Row ${rowNumber}: Team ID "${teamId}" already exists in the system`);
           duplicateNames.push(teamId);
         } else {
           seenIdsInFile.add(normalizedId);
@@ -237,9 +589,6 @@ export class FileParserService {
       if (teamName) {
         if (seenNamesInFile.has(normalizedName)) {
           errors.push(`Row ${rowNumber}: Duplicate Team Name "${teamName}" in uploaded file`);
-          duplicateNames.push(teamName);
-        } else if (existingNames.has(normalizedName)) {
-          errors.push(`Row ${rowNumber}: Team "${teamName}" already exists in the system`);
           duplicateNames.push(teamName);
         } else {
           seenNamesInFile.add(normalizedName);
@@ -269,7 +618,7 @@ export class FileParserService {
     });
 
     return {
-      totalRows: rows.length,
+      totalRows: processedRows.length,
       validCount: validTeams.length,
       invalidCount: invalidTeams.length,
       duplicateCount: duplicateNames.length,
@@ -710,12 +1059,14 @@ export class FileParserService {
           candidateRows.push({
             'Team ID': parts[0],
             'Team Name': parts[1],
+            'Registration No.': parts[2],
             Password: parts[2],
             'Team Lead Name': parts[3] || 'Team Lead',
           });
         } else if (parts.length === 2) {
           candidateRows.push({
             'Team Name': parts[0],
+            'Registration No.': parts[1],
             Password: parts[1],
           });
         }

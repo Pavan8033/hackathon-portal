@@ -140,6 +140,9 @@ export const AdminProblemsPage: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Reset input value so selecting the same file triggers onChange every time
+    e.target.value = '';
+
     setUploadedFileName(file.name);
     setIsParsing(true);
 
@@ -164,13 +167,14 @@ export const AdminProblemsPage: React.FC = () => {
     try {
       const res = await ProblemService.importProblems(parsedSummary.validProblems);
       showToast(
-        `Successfully imported ${res.importedCount} problem statements into catalog.`,
+        `Successfully imported ${res.importedCount} problem statements as DRAFT. Publish them under Release Control when ready.`,
         'success',
         'Import Completed'
       );
       setIsImportModalOpen(false);
       setParsedSummary(null);
       setUploadedFileName('');
+      if (fileInputRef.current) fileInputRef.current.value = '';
       await loadData();
     } catch (err: any) {
       showToast(err?.message || 'Failed to import problem statements.', 'error', 'Import Failed');
@@ -232,6 +236,7 @@ export const AdminProblemsPage: React.FC = () => {
               setIsImportModalOpen(true);
               setParsedSummary(null);
               setUploadedFileName('');
+              if (fileInputRef.current) fileInputRef.current.value = '';
             }}
             className="bg-white border-[#D5E6DB] text-[#164A36] hover:bg-[#EEF5F0]"
           >

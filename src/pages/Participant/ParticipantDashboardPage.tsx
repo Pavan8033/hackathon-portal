@@ -18,15 +18,17 @@ import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
 import { CountdownTimer } from '../../components/common/CountdownTimer';
 import { useAuth } from '../../context/AuthContext';
+import { TeamService } from '../../services/teamService';
 import { ProblemService } from '../../services/problemService';
 import { SelectionService } from '../../services/selectionService';
 import { SettingsService } from '../../services/settingsService';
 import { AnnouncementService } from '../../services/announcementService';
 import { formatSelectionDateTime } from '../../utils/formatters';
-import type { ProblemRecord, TeamSelection, PortalSettings, AnnouncementRecord } from '../../types';
+import type { ProblemRecord, TeamSelection, PortalSettings, AnnouncementRecord, TeamRecord } from '../../types';
 
 export const ParticipantDashboardPage: React.FC = () => {
   const { team } = useAuth();
+  const [teamDetails, setTeamDetails] = useState<TeamRecord | null>(team || null);
   const [publishedProblems, setPublishedProblems] = useState<ProblemRecord[]>([]);
   const [announcements, setAnnouncements] = useState<AnnouncementRecord[]>([]);
   const [scheduledReleaseTime, setScheduledReleaseTime] = useState<string | null>(null);
@@ -61,6 +63,11 @@ export const ParticipantDashboardPage: React.FC = () => {
       }
 
       if (team?.teamId) {
+        // Fetch and compare logged in Team ID with imported participant details
+        const fullTeam = await TeamService.getTeamById(team.teamId);
+        if (fullTeam && fullTeam.teamId.trim().toLowerCase() === team.teamId.trim().toLowerCase()) {
+          setTeamDetails(fullTeam);
+        }
         const currentSel = await SelectionService.getSelectionForTeam(team.teamId);
         setSelection(currentSel);
       }
@@ -78,15 +85,18 @@ export const ParticipantDashboardPage: React.FC = () => {
   const totalPublished = publishedProblems.length;
   const isLive = totalPublished > 0;
 
-  const teamName = team?.teamName || 'Team Alpha';
-  const teamId = team?.teamId || 'TEAM-042';
-  const teamLead = team?.teamLeadName || 'John Doe';
-  const memberCount = team?.teamMembers?.length || 4;
+  const currentTeam = teamDetails || team;
+  const teamName = currentTeam?.teamName || 'Team';
+  const teamId = currentTeam?.teamId || '';
+  const teamLead = currentTeam?.teamLeadName || 'Team Lead';
+  const regNo = currentTeam?.teamLeadRegistrationNumber || '';
+  const memberList = currentTeam?.teamMembers || [];
+  const memberCount = memberList.length > 0 ? memberList.length : 1;
 
-  const hasSelection = Boolean(selection || team?.selectedProblemId);
-  const selectedProblemId = selection?.problemId || team?.selectedProblemId || '';
-  const selectedProblemTitle = selection?.problemTitle || team?.selectedProblemTitle || '';
-  const selectedTimestamp = selection?.selectedAt || team?.selectionDate || '';
+  const hasSelection = Boolean(selection || currentTeam?.selectedProblemId);
+  const selectedProblemId = selection?.problemId || currentTeam?.selectedProblemId || '';
+  const selectedProblemTitle = selection?.problemTitle || currentTeam?.selectedProblemTitle || '';
+  const selectedTimestamp = selection?.selectedAt || currentTeam?.selectionDate || '';
   const formattedTime = formatSelectionDateTime(selectedTimestamp);
 
   const isSelectionOpen = settings ? settings.isSelectionOpen : true;
@@ -166,65 +176,113 @@ export const ParticipantDashboardPage: React.FC = () => {
             </Badge>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mt-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3.5 mt-6">
             {/* Team */}
-            <div className="p-4 rounded-xl bg-[#F7F5EF]/70 border border-[#E5E7EB]">
+            <div className="p-3.5 rounded-xl bg-[#F7F5EF]/70 border border-[#E5E7EB]">
               <span className="text-[11px] font-bold text-[#667085] uppercase tracking-wider block">
                 Team
               </span>
-              <span className="text-base font-bold text-[#111827] mt-1 block truncate">
+              <span className="text-sm sm:text-base font-bold text-[#111827] mt-1 block truncate">
                 {teamName}
               </span>
             </div>
 
             {/* Team ID */}
-            <div className="p-4 rounded-xl bg-[#F7F5EF]/70 border border-[#E5E7EB]">
+            <div className="p-3.5 rounded-xl bg-[#F7F5EF]/70 border border-[#E5E7EB]">
               <span className="text-[11px] font-bold text-[#667085] uppercase tracking-wider block">
                 Team ID
               </span>
-              <span className="font-mono text-base font-bold text-[#164A36] mt-1 block">
+              <span className="font-mono text-sm sm:text-base font-bold text-[#164A36] mt-1 block">
                 {teamId}
               </span>
             </div>
 
             {/* Team Lead */}
-            <div className="p-4 rounded-xl bg-[#F7F5EF]/70 border border-[#E5E7EB]">
+            <div className="p-3.5 rounded-xl bg-[#F7F5EF]/70 border border-[#E5E7EB]">
               <span className="text-[11px] font-bold text-[#667085] uppercase tracking-wider block">
                 Team Lead
               </span>
-              <span className="text-base font-bold text-[#111827] mt-1 block truncate">
+              <span className="text-sm sm:text-base font-bold text-[#111827] mt-1 block truncate">
                 {teamLead}
               </span>
             </div>
 
+            {/* Registration Number */}
+            <div className="p-3.5 rounded-xl bg-[#F7F5EF]/70 border border-[#E5E7EB]">
+              <span className="text-[11px] font-bold text-[#667085] uppercase tracking-wider block">
+                Reg. Number
+              </span>
+              <span className="font-mono text-sm sm:text-base font-semibold text-[#164A36] mt-1 block truncate">
+                {regNo || '—'}
+              </span>
+            </div>
+
             {/* Members */}
-            <div className="p-4 rounded-xl bg-[#F7F5EF]/70 border border-[#E5E7EB]">
+            <div className="p-3.5 rounded-xl bg-[#F7F5EF]/70 border border-[#E5E7EB]">
               <span className="text-[11px] font-bold text-[#667085] uppercase tracking-wider block">
                 Members
               </span>
-              <span className="text-base font-bold text-[#111827] mt-1 block">
+              <span className="text-sm sm:text-base font-bold text-[#111827] mt-1 block">
                 {memberCount} Members
               </span>
             </div>
 
             {/* Problem Selection status badge */}
-            <div className="p-4 rounded-xl bg-[#F7F5EF]/70 border border-[#E5E7EB]">
+            <div className="p-3.5 rounded-xl bg-[#F7F5EF]/70 border border-[#E5E7EB]">
               <span className="text-[11px] font-bold text-[#667085] uppercase tracking-wider block">
-                Problem Selection
+                Selection
               </span>
               {hasSelection ? (
-                <span className="text-xs font-bold text-[#164A36] mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#EEF5F0] border border-[#D5E6DB]">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-[#164A36]" />
+                <span className="text-xs font-bold text-[#164A36] mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#EEF5F0] border border-[#D5E6DB]">
+                  <CheckCircle2 className="w-3 h-3 text-[#164A36]" />
                   CONFIRMED
                 </span>
               ) : (
-                <span className="text-xs font-bold text-[#667085] mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-gray-100 border border-gray-200">
+                <span className="text-xs font-bold text-[#667085] mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded bg-gray-100 border border-gray-200">
                   <span className="w-1.5 h-1.5 rounded-full bg-gray-400" />
-                  NOT SELECTED YET
+                  PENDING
                 </span>
               )}
             </div>
           </div>
+
+          {/* Enrolled Team Members Roster */}
+          {memberList.length > 0 && (
+            <div className="mt-5 pt-4 border-t border-[#F3F4F6]">
+              <div className="flex items-center justify-between mb-2.5">
+                <span className="text-[11px] font-bold text-[#667085] uppercase tracking-wider">
+                  Enrolled Team Members ({memberList.length})
+                </span>
+                {currentTeam?.college && (
+                  <span className="text-xs text-[#667085] font-medium hidden sm:inline">
+                    {currentTeam.college}
+                  </span>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {memberList.map((m, idx) => {
+                  const isLead = m.trim().toLowerCase() === teamLead.trim().toLowerCase();
+                  return (
+                    <span
+                      key={idx}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold border ${
+                        isLead
+                          ? 'bg-[#EEF5F0] text-[#164A36] border-[#D5E6DB]'
+                          : 'bg-[#F7F5EF] text-[#374151] border-[#E5E7EB]'
+                      }`}
+                    >
+                      <span>{m}</span>
+                      {isLead && (
+                        <span className="text-[9px] font-bold uppercase bg-[#164A36] text-white px-1.5 py-0.5 rounded leading-none">
+                          Lead
+                        </span>
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Sections 2 & 3: PROBLEM SELECTION CARD (No Selection vs Selected) */}

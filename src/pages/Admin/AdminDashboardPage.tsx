@@ -10,6 +10,7 @@ import {
   ShieldCheck,
   Activity,
   TrendingUp,
+  KeyRound,
 } from 'lucide-react';
 import { AdminLayout } from '../../components/layout/AdminLayout';
 import { Button } from '../../components/ui/Button';
@@ -82,6 +83,15 @@ export const AdminDashboardPage: React.FC = () => {
       description="Live tracking of official challenge releases, team credentials, and real-time problem selections."
       actionButton={
         <div className="flex items-center gap-2.5">
+          <Button
+            to="/admin/credentials"
+            variant="secondary"
+            size="md"
+            leftIcon={<KeyRound className="w-4 h-4" />}
+            className="bg-white"
+          >
+            Credentials
+          </Button>
           <Button
             to="/admin/participants"
             variant="secondary"

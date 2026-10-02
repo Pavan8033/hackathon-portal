@@ -248,7 +248,7 @@ export class ProblemService {
         category: r.category || 'General Innovation',
         difficulty: r.difficulty || 'Intermediate',
         tags: r.tags && r.tags.length > 0 ? r.tags : [r.category || 'General Innovation'],
-        status: 'PUBLISHED', // Auto-publish so teams can immediately explore and select
+        status: 'DRAFT', // Unreleased: Requires admin release control publication
         createdAt: timestamp,
         updatedAt: timestamp,
         createdBy: 'Hackathon Organizing Committee',

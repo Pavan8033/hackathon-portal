@@ -14,6 +14,7 @@ import {
   ExternalLink,
   Radio,
   ShieldAlert,
+  KeyRound,
 } from 'lucide-react';
 import { Logo } from '../ui/Logo';
 import { Button } from '../ui/Button';
@@ -48,6 +49,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
     { label: 'Release Control', href: '/admin/release-control', icon: Radio },
     { label: 'Problem Statements', href: '/admin/problems', icon: FileText },
     { label: 'Participants', href: '/admin/participants', icon: Users },
+    { label: 'Credentials', href: '/admin/credentials', icon: KeyRound },
     { label: 'Team Selections', href: '/admin/selections', icon: CheckSquare },
     { label: 'Announcements', href: '/admin/announcements', icon: Bell },
     { label: 'Data Integrity', href: '/admin/data-integrity', icon: ShieldAlert },

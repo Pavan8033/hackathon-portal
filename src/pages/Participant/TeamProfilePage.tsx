@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Users,
@@ -8,18 +8,39 @@ import {
   ArrowLeft,
   KeyRound,
   CheckCircle2,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { Navbar } from '../../components/layout/Navbar';
 import { Footer } from '../../components/layout/Footer';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { useAuth } from '../../context/AuthContext';
+import { TeamService } from '../../services/teamService';
 import { maskRegistrationNumber } from '../../utils/formatters';
+import type { TeamRecord } from '../../types';
 
 export const TeamProfilePage: React.FC = () => {
   const { team } = useAuth();
+  const [teamDetails, setTeamDetails] = useState<TeamRecord | null>(team || null);
+  const [showReg, setShowReg] = useState(false);
 
-  const maskedReg = maskRegistrationNumber(team?.teamLeadRegistrationNumber);
+  useEffect(() => {
+    const loadProfile = async () => {
+      if (team?.teamId) {
+        const full = await TeamService.getTeamById(team.teamId);
+        // Compare login username with imported participant roster team id
+        if (full && full.teamId.trim().toLowerCase() === team.teamId.trim().toLowerCase()) {
+          setTeamDetails(full);
+        }
+      }
+    };
+    loadProfile();
+  }, [team?.teamId]);
+
+  const currentTeam = teamDetails || team;
+  const maskedReg = maskRegistrationNumber(currentTeam?.teamLeadRegistrationNumber);
+  const rawReg = currentTeam?.teamLeadRegistrationNumber || currentTeam?.teamId || '';
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F7F5EF]">
@@ -48,7 +69,7 @@ export const TeamProfilePage: React.FC = () => {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 pb-6 border-b border-[#F3F4F6]">
             <div className="flex items-center gap-4">
               <div className="w-16 h-16 rounded-2xl bg-[#EEF5F0] text-[#164A36] border border-[#D5E6DB] flex items-center justify-center font-bold text-xl font-mono shrink-0">
-                {team?.teamName ? team.teamName.slice(0, 2).toUpperCase() : 'TM'}
+                {currentTeam?.teamName ? currentTeam.teamName.slice(0, 2).toUpperCase() : 'TM'}
               </div>
               <div>
                 <span className="text-[11px] font-bold uppercase tracking-wider text-[#667085] block">
@@ -64,8 +85,8 @@ export const TeamProfilePage: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
-              <Badge variant={team?.status === 'active' ? 'forest' : 'amber'} size="md">
-                {team?.status === 'active' ? 'ACTIVE & VERIFIED' : 'PENDING'}
+              <Badge variant={currentTeam?.status === 'active' ? 'forest' : 'amber'} size="md">
+                {currentTeam?.status === 'active' ? 'ACTIVE & VERIFIED' : 'PENDING'}
               </Badge>
             </div>
           </div>
@@ -78,7 +99,7 @@ export const TeamProfilePage: React.FC = () => {
                 Team Name
               </span>
               <span className="text-base font-bold text-[#111827] mt-1 block truncate">
-                {team?.teamName || 'Team Alpha'}
+                {currentTeam?.teamName || 'Team Alpha'}
               </span>
             </div>
 
@@ -88,7 +109,7 @@ export const TeamProfilePage: React.FC = () => {
                 Team ID
               </span>
               <span className="font-mono text-base font-bold text-[#164A36] mt-1 block">
-                {team?.teamId || 'TEAM-042'}
+                {currentTeam?.teamId || 'TEAM-042'}
               </span>
             </div>
 
@@ -98,20 +119,27 @@ export const TeamProfilePage: React.FC = () => {
                 Team Lead
               </span>
               <span className="text-base font-bold text-[#111827] mt-1 block truncate">
-                {team?.teamLeadName || 'John Doe'}
+                {currentTeam?.teamLeadName || 'John Doe'}
               </span>
             </div>
 
-            {/* Registration Number — MASKED per Section 13 */}
+            {/* Registration Number — with reveal/hide toggle */}
             <div className="p-4 rounded-xl bg-[#F7F5EF]/70 border border-[#E5E7EB]">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-bold text-[#667085] uppercase tracking-wider block">
                   Registration Number
                 </span>
-                <span className="text-[10px] text-[#164A36] font-bold uppercase">Masked</span>
+                <button
+                  type="button"
+                  onClick={() => setShowReg(!showReg)}
+                  className="text-[10px] text-[#164A36] font-bold uppercase inline-flex items-center gap-1 hover:underline"
+                >
+                  {showReg ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                  <span>{showReg ? 'Hide' : 'Reveal'}</span>
+                </button>
               </div>
               <span className="font-mono text-base font-bold text-[#111827] mt-1 block tracking-wider">
-                {maskedReg}
+                {showReg ? rawReg : maskedReg}
               </span>
             </div>
 
@@ -122,7 +150,7 @@ export const TeamProfilePage: React.FC = () => {
               </span>
               <span className="text-xs font-medium text-[#111827] mt-1.5 block truncate flex items-center gap-1.5">
                 <Mail className="w-3.5 h-3.5 text-[#667085] shrink-0" />
-                <span>{team?.email || 'team@university.edu'}</span>
+                <span>{currentTeam?.email || 'team@university.edu'}</span>
               </span>
             </div>
 
@@ -133,7 +161,7 @@ export const TeamProfilePage: React.FC = () => {
               </span>
               <span className="text-xs font-medium text-[#111827] mt-1.5 block flex items-center gap-1.5">
                 <Phone className="w-3.5 h-3.5 text-[#667085] shrink-0" />
-                <span>{team?.phone || '+91 98765 00000'}</span>
+                <span>{currentTeam?.phone || '+91 98765 00000'}</span>
               </span>
             </div>
           </div>
@@ -147,16 +175,16 @@ export const TeamProfilePage: React.FC = () => {
                 Registered Participants
               </span>
               <h2 className="text-lg font-bold text-[#111827]">
-                Team Members ({team?.teamMembers?.length || 4})
+                Team Members ({currentTeam?.teamMembers?.length || 1})
               </h2>
             </div>
             <Users className="w-5 h-5 text-[#667085]" />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {team?.teamMembers && team.teamMembers.length > 0 ? (
-              team.teamMembers.map((member, index) => {
-                const isLead = member === team.teamLeadName;
+            {currentTeam?.teamMembers && currentTeam.teamMembers.length > 0 ? (
+              currentTeam.teamMembers.map((member, index) => {
+                const isLead = member.trim().toLowerCase() === (currentTeam.teamLeadName || '').trim().toLowerCase();
                 return (
                   <div
                     key={index}
@@ -207,24 +235,24 @@ export const TeamProfilePage: React.FC = () => {
               Challenge Status
             </span>
             <h3 className="text-base sm:text-lg font-bold text-[#111827]">
-              {team?.selectedProblemId ? (
+              {currentTeam?.selectedProblemId ? (
                 <span className="flex items-center gap-2">
                   <CheckCircle2 className="w-5 h-5 text-[#164A36]" />
-                  <span>Committed to {team.selectedProblemId}: {team.selectedProblemTitle}</span>
+                  <span>Committed to {currentTeam.selectedProblemId}: {currentTeam.selectedProblemTitle}</span>
                 </span>
               ) : (
                 'No official problem statement locked yet.'
               )}
             </h3>
             <p className="text-xs text-[#667085]">
-              {team?.selectedProblemId
+              {currentTeam?.selectedProblemId
                 ? 'Your selection is locked and confirmed by the hackathon system.'
                 : 'Explore released challenges to commit to your team challenge.'}
             </p>
           </div>
 
           <div className="shrink-0">
-            {team?.selectedProblemId ? (
+            {currentTeam?.selectedProblemId ? (
               <Button
                 to="/participant/selected-problem"
                 variant="primary"

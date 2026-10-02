@@ -125,12 +125,12 @@ export const TeamLoginPage: React.FC = () => {
                     setTeamIdentifier(e.target.value);
                     if (errorMessage) setErrorMessage(null);
                   }}
-                  placeholder="e.g. TM-101 or Team Name"
+                  placeholder="e.g. ALPHA-001 or TM-101"
                   className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-[#E5E7EB] bg-[#F7F5EF]/40 text-[#111827] placeholder:text-[#9CA3AF] text-sm focus:outline-none focus:ring-2 focus:ring-[#164A36] focus:border-[#164A36] transition-colors"
                 />
               </div>
               <p className="mt-1 text-[11px] text-[#667085]">
-                Enter the exact Team ID provided in your registration credentials.
+                Enter your unique Team ID assigned by the organizers.
               </p>
             </div>
 
@@ -139,7 +139,7 @@ export const TeamLoginPage: React.FC = () => {
                 htmlFor="password"
                 className="block text-xs font-bold uppercase tracking-wider text-[#111827] mb-2"
               >
-                Password
+                Registration Number (Password)
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#667085]">
@@ -154,8 +154,8 @@ export const TeamLoginPage: React.FC = () => {
                     setPassword(e.target.value);
                     if (errorMessage) setErrorMessage(null);
                   }}
-                  placeholder="Enter your team password"
-                  className="w-full pl-10 pr-11 py-2.5 rounded-lg border border-[#E5E7EB] bg-[#F7F5EF]/40 text-[#111827] placeholder:text-[#9CA3AF] text-sm focus:outline-none focus:ring-2 focus:ring-[#164A36] focus:border-[#164A36] transition-colors"
+                  placeholder="Enter Registration Number (e.g. 21BCE1001)"
+                  className="w-full pl-10 pr-11 py-2.5 rounded-lg border border-[#E5E7EB] bg-[#F7F5EF]/40 text-[#111827] placeholder:text-[#9CA3AF] text-sm focus:outline-none focus:ring-2 focus:ring-[#164A36] focus:border-[#164A36] transition-colors font-mono"
                 />
                 <button
                   type="button"
@@ -167,6 +167,9 @@ export const TeamLoginPage: React.FC = () => {
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
+              <p className="mt-1 text-[11px] text-[#667085]">
+                Use your Team Lead's Registration Number as the password.
+              </p>
             </div>
 
             {/* Remember Me & Forgot Credentials */}

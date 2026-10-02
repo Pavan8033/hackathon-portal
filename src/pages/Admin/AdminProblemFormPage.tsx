@@ -224,28 +224,41 @@ export const AdminProblemFormPage: React.FC = () => {
 
           <Button
             type="button"
-            variant="secondary"
-            size="md"
-            disabled={isSubmitting}
-            onClick={() => handleSubmit('DRAFT')}
-            className="bg-white"
-          >
-            {isSubmitting ? 'Saving...' : 'SAVE AS DRAFT'}
-          </Button>
-
-          <Button
-            type="button"
             variant="primary"
             size="md"
             disabled={isSubmitting}
-            onClick={() => handleSubmit('PUBLISHED')}
+            onClick={() => handleSubmit(isEditing ? status : 'DRAFT')}
           >
-            {isSubmitting ? 'Publishing...' : 'PUBLISH PROBLEM'}
+            {isSubmitting ? 'Saving...' : (isEditing ? 'SAVE CHANGES' : 'SAVE PROBLEM STATEMENT')}
           </Button>
         </div>
       }
     >
       <div className="bg-white rounded-2xl border border-[#E5E7EB] p-6 sm:p-10 shadow-xs space-y-8">
+        {/* Release Control Policy Notice */}
+        <div className="bg-[#F7F5EF] border border-[#E5E7EB] rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-[#EEF5F0] text-[#164A36] flex items-center justify-center font-bold text-sm shrink-0">
+              🔒
+            </div>
+            <div>
+              <p className="font-bold text-[#111827]">
+                Release Control Protection Active
+              </p>
+              <p className="text-[#667085]">
+                Problem statements are created as <strong>DRAFT (Unreleased)</strong> and will NOT be visible to participants until officially published via <strong>Release Control</strong>.
+              </p>
+            </div>
+          </div>
+          <Button
+            to="/admin/release-control"
+            variant="ghost"
+            size="sm"
+            className="text-[#164A36] underline text-xs shrink-0 self-start sm:self-auto"
+          >
+            Go to Release Control →
+          </Button>
+        </div>
         {/* Core Identity */}
         <div>
           <h3 className="text-sm font-bold uppercase tracking-wider text-[#111827] mb-4 pb-2 border-b border-[#F3F4F6]">

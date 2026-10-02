@@ -126,6 +126,24 @@ export interface ImportValidationSummary {
   duplicateNames: string[];
 }
 
+export interface ParsedCredentialRow {
+  rowNumber: number;
+  teamId: string;
+  registrationNumber: string;
+  isValid: boolean;
+  errors: string[];
+}
+
+export interface ImportCredentialSummary {
+  totalRows: number;
+  validCount: number;
+  invalidCount: number;
+  duplicateCount: number;
+  validCredentials: ParsedCredentialRow[];
+  invalidCredentials: ParsedCredentialRow[];
+  duplicateIds: string[];
+}
+
 export interface ParsedProblemRow {
   rowNumber: number;
   problemId: string;

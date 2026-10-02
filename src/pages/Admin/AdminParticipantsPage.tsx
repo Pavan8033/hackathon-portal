@@ -69,13 +69,18 @@ export const AdminParticipantsPage: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Reset input value so selecting the same file triggers onChange every time
+    e.target.value = '';
+
     setUploadedFileName(file.name);
     setIsParsing(true);
 
     try {
       const existingNames = teams.map((t) => t.teamName);
+      const existingIds = teams.map((t) => t.teamId);
       const summary = await FileParserService.parseParticipantFile(file, {
         existingTeamNames: existingNames,
+        existingTeamIds: existingIds,
       });
       setParsedSummary(summary);
     } catch (err: any) {
@@ -167,13 +172,13 @@ export const AdminParticipantsPage: React.FC = () => {
     }
   };
 
-  // Sample CSV Template Downloader featuring Team ID, Team Name, and unique Password
+  // Sample CSV Template Downloader in format: TEAM ID, TEAM NAME, TEAM LEAD, REGISTRATION NUMBER, MEMBERS
   const downloadSampleTemplate = () => {
     const csvContent =
-      'data:text/csv;charset=utf-8,team id,team name,password,team lead name,email,phone,college\n' +
-      'TM-2026-101,Quantum Pioneers,Pioneer#9182,Sarah Jenkins,sarah.j@univ.edu,+91 98765 00001,School of Computing\n' +
-      'TM-2026-102,TerraPulse Labs,Terra@7741,Rohan Varma,rohan.v@univ.edu,+91 98765 00002,Dept of Electrical Engg\n' +
-      'TM-2026-103,CyberVanguard,Vanguard$5520,Anya Ivanova,anya.i@univ.edu,+91 98765 00003,Faculty of Cybersecurity\n';
+      'data:text/csv;charset=utf-8,TEAM ID,TEAM NAME,TEAM LEAD,REGISTRATION NUMBER,MEMBERS,EMAIL,PHONE,COLLEGE\n' +
+      'ALPHA-001,Quantum Pioneers,Sarah Jenkins,99240041001,"Sarah Jenkins, Alex Doe, Sam Ray",sarah.j@univ.edu,+91 98765 00001,School of Computing\n' +
+      'ALPHA-002,TerraPulse Labs,Rohan Varma,99240041002,"Rohan Varma, Maya Patel, Kabir Das",rohan.v@univ.edu,+91 98765 00002,Dept of Electrical Engg\n' +
+      'ALPHA-003,CyberVanguard,Anya Ivanova,99240041003,"Anya Ivanova, Leo Chen",anya.i@univ.edu,+91 98765 00003,Faculty of Cybersecurity\n';
 
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
@@ -226,6 +231,7 @@ export const AdminParticipantsPage: React.FC = () => {
             onClick={() => {
               setParsedSummary(null);
               setUploadedFileName('');
+              if (fileInputRef.current) fileInputRef.current.value = '';
               setIsImportModalOpen(true);
             }}
           >
@@ -442,7 +448,7 @@ export const AdminParticipantsPage: React.FC = () => {
                   Import Hackathon Participants
                 </h3>
                 <p className="text-xs text-[#667085] mt-1">
-                  Supported formats: <strong>.xlsx, .xls, .csv, .pdf</strong>. Recognizes <strong>team id</strong> (login username), <strong>team name</strong>, and unique <strong>password</strong> columns automatically.
+                  Supported formats: <strong>.xlsx, .xls, .csv, .pdf</strong>. Standard columns: <strong>TEAM ID</strong>, <strong>TEAM NAME</strong>, <strong>TEAM LEAD</strong>, <strong>REGISTRATION NUMBER</strong>, and <strong>MEMBERS</strong>. Stores all participant details and links automatically with team login credentials.
                 </p>
               </div>
 

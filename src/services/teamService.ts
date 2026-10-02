@@ -91,13 +91,15 @@ export class TeamService {
     const inputHash = await hashCredential(trimmedPass);
     const matchesHash = Boolean(
       (team.credentialHash && team.credentialHash === inputHash) ||
-      (team.teamLeadRegistrationNumber && team.teamLeadRegistrationNumber.trim() === trimmedPass)
+      (team.teamLeadRegistrationNumber &&
+        team.teamLeadRegistrationNumber.trim().toLowerCase() === trimmedPass.toLowerCase()) ||
+      (team.teamId && team.teamId.trim().toLowerCase() === trimmedPass.toLowerCase())
     );
 
     if (!matchesHash) {
       return {
         success: false,
-        error: 'Invalid password. Please check your assigned password.',
+        error: 'Invalid password. Please check your assigned Registration Number / Password.',
       };
     }
 
@@ -117,49 +119,100 @@ export class TeamService {
   }
 
   /**
-   * Import valid teams from parsed spreadsheet rows with columns (team id, team name, password)
+   * Import valid teams from parsed spreadsheet rows with columns (TEAM ID, TEAM NAME, TEAM LEAD, REGISTRATION NUMBER, MEMBERS)
+   * If a team with the given teamId already exists (e.g. from credentials import), merges and updates with full participant details!
    */
   public static async importTeams(
     rows: ParsedTeamRow[]
-  ): Promise<{ importedCount: number; skippedCount: number; errors: string[] }> {
+  ): Promise<{ importedCount: number; updatedCount: number; skippedCount: number; errors: string[] }> {
     const existing = await this.getAllTeams();
     const newRecords: TeamRecord[] = [];
     const timestamp = new Date().toISOString();
     const errors: string[] = [];
+    let updatedCount = 0;
 
     const normalize = (str: string) => str.trim().toLowerCase().replace(/\s+/g, ' ');
 
-    const existingNames = new Set(existing.map((t) => normalize(t.teamName)));
-    const existingIds = new Set(existing.map((t) => normalize(t.teamId)));
-
     for (const r of rows) {
-      const normalizedName = normalize(r.teamName);
       const customId = r.teamId ? normalize(r.teamId) : '';
 
-      // Prevent duplicate teams
-      if (existingNames.has(normalizedName)) {
+      // Check if team already exists by teamId -> MERGE with all participant details!
+      if (customId) {
+        const existingIndex = existing.findIndex((t) => normalize(t.teamId) === customId);
+        if (existingIndex >= 0) {
+          const prev = existing[existingIndex];
+          const secretPassword = (
+            r.password ||
+            r.teamLeadRegistrationNumber ||
+            prev.teamLeadRegistrationNumber ||
+            prev.teamId
+          ).trim();
+          const credentialHash = await hashCredential(secretPassword);
+          const members =
+            r.members && r.members.length > 0
+              ? r.members
+              : prev.teamMembers && prev.teamMembers.length > 0
+              ? prev.teamMembers
+              : [r.teamLeadName?.trim() || prev.teamLeadName || 'Team Lead'];
+
+          const updated: TeamRecord = {
+            ...prev,
+            teamName: r.teamName?.trim() || prev.teamName,
+            teamLeadName: r.teamLeadName?.trim() || prev.teamLeadName,
+            teamLeadRegistrationNumber:
+              r.teamLeadRegistrationNumber?.trim() || prev.teamLeadRegistrationNumber,
+            credentialHash,
+            teamMembers: members,
+            email: r.email?.trim() || prev.email,
+            phone: r.phone?.trim() || prev.phone,
+            college: r.college?.trim() || prev.college,
+            status: 'active',
+            updatedAt: timestamp,
+          };
+
+          existing[existingIndex] = updated;
+
+          if (isFirebaseConfigured && db) {
+            try {
+              await setDoc(doc(db, 'teams', updated.teamId), updated);
+            } catch (err) {
+              console.warn('[TeamService] Firestore merge error:', err);
+            }
+          }
+
+          updatedCount++;
+          continue;
+        }
+      }
+
+      // Check duplicate team name among existing teams
+      const normalizedName = normalize(r.teamName);
+      if (existing.some((t) => normalize(t.teamName) === normalizedName)) {
         errors.push(`Team "${r.teamName.trim()}" already exists in the directory.`);
         continue;
       }
-      if (customId && existingIds.has(customId)) {
-        errors.push(`Team ID "${r.teamId}" already exists.`);
-        continue;
-      }
 
-      existingNames.add(normalizedName);
+      const assignedId =
+        r.teamId?.trim() ||
+        `TM-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`;
 
-      const secretPassword = (r.password || r.teamLeadRegistrationNumber || '').trim();
+      const secretPassword = (
+        r.password ||
+        r.teamLeadRegistrationNumber ||
+        assignedId
+      ).trim();
       const credentialHash = await hashCredential(secretPassword);
-      const assignedId = r.teamId?.trim() || `TM-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`;
-      existingIds.add(normalize(assignedId));
 
       const record: TeamRecord = {
         teamId: assignedId,
         teamName: r.teamName.trim(),
         teamLeadName: r.teamLeadName.trim() || 'Team Lead',
-        teamLeadRegistrationNumber: r.password ? '• Protected Password •' : (r.teamLeadRegistrationNumber?.trim() || ''),
+        teamLeadRegistrationNumber: r.teamLeadRegistrationNumber?.trim() || '',
         credentialHash,
-        teamMembers: r.members && r.members.length > 0 ? r.members : [r.teamLeadName?.trim() || r.teamName.trim()],
+        teamMembers:
+          r.members && r.members.length > 0
+            ? r.members
+            : [r.teamLeadName?.trim() || r.teamName.trim()],
         email: r.email?.trim() || '',
         phone: r.phone?.trim() || '',
         college: r.college?.trim() || 'Participant Institution',
@@ -169,6 +222,7 @@ export class TeamService {
       };
 
       newRecords.push(record);
+      existing.push(record);
 
       if (isFirebaseConfigured && db) {
         try {
@@ -180,14 +234,118 @@ export class TeamService {
     }
 
     // Update local cache
-    const merged = [...existing, ...newRecords];
-    this.saveLocalTeams(merged);
+    this.saveLocalTeams(existing);
 
     return {
       importedCount: newRecords.length,
-      skippedCount: rows.length - newRecords.length,
+      updatedCount,
+      skippedCount: rows.length - (newRecords.length + updatedCount),
       errors,
     };
+  }
+
+  /**
+   * Bulk import login credentials (TEAM ID as username and REGISTRATION NUMBER as password)
+   */
+  public static async importCredentials(
+    credentials: { teamId: string; registrationNumber: string }[]
+  ): Promise<{ importedCount: number; updatedCount: number; totalProcessed: number }> {
+    const existing = await this.getAllTeams();
+    const timestamp = new Date().toISOString();
+    let importedCount = 0;
+    let updatedCount = 0;
+
+    const normalize = (str: string) => str.trim().toLowerCase().replace(/\s+/g, ' ');
+
+    for (const cred of credentials) {
+      const cleanId = cred.teamId.trim();
+      const cleanReg = cred.registrationNumber.trim();
+      if (!cleanId || !cleanReg) continue;
+
+      const normId = normalize(cleanId);
+      const existingIndex = existing.findIndex((t) => normalize(t.teamId) === normId);
+      const credentialHash = await hashCredential(cleanReg);
+
+      if (existingIndex >= 0) {
+        // Update existing team credentials
+        const prev = existing[existingIndex];
+        const updated: TeamRecord = {
+          ...prev,
+          teamLeadRegistrationNumber: cleanReg,
+          credentialHash,
+          updatedAt: timestamp,
+        };
+        existing[existingIndex] = updated;
+
+        if (isFirebaseConfigured && db) {
+          try {
+            await setDoc(doc(db, 'teams', updated.teamId), updated);
+          } catch (err) {
+            console.warn('[TeamService] Firestore credential update error:', err);
+          }
+        }
+        updatedCount++;
+      } else {
+        // Create new standalone team record awaiting full participant roster details
+        const newRecord: TeamRecord = {
+          teamId: cleanId,
+          teamName: `Team ${cleanId}`,
+          teamLeadName: 'Team Lead',
+          teamLeadRegistrationNumber: cleanReg,
+          credentialHash,
+          teamMembers: ['Team Lead'],
+          email: `${cleanId.toLowerCase().replace(/[^a-z0-9]/g, '')}@hackathon.local`,
+          phone: '',
+          college: 'Participant Institution',
+          status: 'active',
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        };
+        existing.push(newRecord);
+
+        if (isFirebaseConfigured && db) {
+          try {
+            await setDoc(doc(db, 'teams', newRecord.teamId), newRecord);
+          } catch (err) {
+            console.warn('[TeamService] Firestore credential save error:', err);
+          }
+        }
+        importedCount++;
+      }
+    }
+
+    this.saveLocalTeams(existing);
+
+    return {
+      importedCount,
+      updatedCount,
+      totalProcessed: importedCount + updatedCount,
+    };
+  }
+
+  /**
+   * Export credentials (Team ID, Registration Number, Team Name) to CSV for admin records
+   */
+  public static async exportCredentialsToCsv(): Promise<string> {
+    const teams = await this.getAllTeams();
+    const headers = [
+      'Team ID (Username)',
+      'Registration Number (Password)',
+      'Team Name',
+      'Team Lead',
+      'Status',
+    ];
+    const rows = teams.map((team) => {
+      const pass = team.teamLeadRegistrationNumber || team.teamId;
+      return [
+        `"${team.teamId}"`,
+        `"${pass.replace(/"/g, '""')}"`,
+        `"${(team.teamName || '').replace(/"/g, '""')}"`,
+        `"${(team.teamLeadName || '').replace(/"/g, '""')}"`,
+        `"${team.status.toUpperCase()}"`,
+      ].join(',');
+    });
+    return [headers.join(','), ...rows].join('\n');
   }
 
   /**
@@ -324,21 +482,32 @@ export class TeamService {
   // ----------------------------------------------------------------
   // Local storage helpers
   // ----------------------------------------------------------------
+  private static inMemoryTeams: TeamRecord[] = [];
+
   private static getLocalTeams(): TeamRecord[] {
     try {
-      const stored = localStorage.getItem(TEAMS_STORAGE_KEY);
-      if (stored) {
-        return JSON.parse(stored);
+      if (typeof localStorage !== 'undefined') {
+        const stored = localStorage.getItem(TEAMS_STORAGE_KEY);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            this.inMemoryTeams = parsed;
+            return parsed;
+          }
+        }
       }
     } catch {
       // LocalStorage access error fallback
     }
-    return [];
+    return this.inMemoryTeams;
   }
 
   private static saveLocalTeams(teams: TeamRecord[]): void {
+    this.inMemoryTeams = teams;
     try {
-      localStorage.setItem(TEAMS_STORAGE_KEY, JSON.stringify(teams));
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(TEAMS_STORAGE_KEY, JSON.stringify(teams));
+      }
     } catch {
       // ignore
     }
