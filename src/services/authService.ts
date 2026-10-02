@@ -21,10 +21,10 @@ export class AuthService {
         : (globalProcess?.env as Record<string, string | undefined>) || {};
 
     const defaultAdminEmail = (
-      env.VITE_ADMIN_DEFAULT_EMAIL || 'admin@hackathon.org'
+      env.VITE_ADMIN_DEFAULT_EMAIL || 'blacksquad8328@gmail.com'
     ).toLowerCase();
     const defaultAdminPass =
-      env.VITE_ADMIN_DEFAULT_PASSWORD || 'admin123';
+      env.VITE_ADMIN_DEFAULT_PASSWORD || 'Blacksquad@8';
 
     // 1. Check Firebase Auth if configured
     if (isFirebaseConfigured && auth) {
