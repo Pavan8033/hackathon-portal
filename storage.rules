@@ -1,0 +1,35 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'admin' ||
+        firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) &&
+        firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin'
+      );
+    }
+
+    // Problem Statement Official Documents
+    match /problem-documents/{allPaths=**} {
+      // Participants and visitors can read official challenge attachments
+      allow read: if true;
+
+      // Only admins can upload, replace, or delete problem documents
+      // Strictly enforce file size under 15MB and valid formats (PDF, Word, Excel)
+      allow write: if isAdmin() &&
+                   request.resource.size < 15 * 1024 * 1024 &&
+                   (
+                     request.resource.contentType.matches('application/pdf') ||
+                     request.resource.contentType.matches('application/msword') ||
+                     request.resource.contentType.matches('application/vnd.openxmlformats-officedocument.*') ||
+                     request.resource.contentType.matches('application/vnd.ms-excel') ||
+                     request.resource.contentType.matches('application/octet-stream')
+                   );
+    }
+  }
+}

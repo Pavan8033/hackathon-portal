@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ivory: #F7F5EF;
+  --color-surface: #FFFFFF;
+  --color-forest: #164A36;
+  --color-forest-dark: #0E3324;
+  --color-forest-light: #2F6B4F;
+  --color-forest-subtle: #EEF5F0;
+  --color-text-main: #111827;
+  --color-text-muted: #667085;
+  --color-border-subtle: #E5E7EB;
+
+  --font-sans: 'Plus Jakarta Sans', Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+@layer base {
+  *, ::before, ::after {
+    border-color: #E5E7EB;
+    box-sizing: border-box;
+  }
+  
+  html {
+    scroll-behavior: smooth;
+    font-family: 'Plus Jakarta Sans', Inter, system-ui, sans-serif;
+  }
+
+  body {
+    font-family: 'Plus Jakarta Sans', Inter, system-ui, sans-serif;
+    background-color: #F7F5EF;
+    color: #111827;
+    margin: 0;
+    padding: 0;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Custom subtle animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Glassmorphism & subtle border accents */
+.glass-nav {
+  background-color: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.surface-card {
+  background-color: #FFFFFF;
+  border: 1px solid #E5E7EB;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.surface-card:hover {
+  border-color: #CBD5E1;
+  box-shadow: 0 4px 20px -2px rgba(17, 24, 39, 0.05);
+}
