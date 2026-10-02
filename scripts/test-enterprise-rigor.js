@@ -534,6 +534,98 @@ async function runTestSuite() {
   assert(!deletedTombstones.has(cleanTarget), 'Re-importing clears deleted tombstone');
 
   // ===============================================================
+  // 7. EDGE CASES: Problem Deletion Cascading & Zero Selection Leakage
+  // ===============================================================
+  console.log('\n--- 7. EDGE CASES: Problem Deletion & Zero Registration Leakage ---');
+  
+  // Setup problem store & selection store
+  const problemStore = new Map();
+  const selectionStore = new Map();
+  const teamRegistrationStore = new Map();
+
+  // Create 3 problems
+  ['PS-01', 'PS-02', 'PS-03'].forEach((pid, idx) => {
+    problemStore.set(pid, {
+      problemId: pid,
+      title: `Challenge ${idx + 1}`,
+      selectedCount: 0,
+      status: 'PUBLISHED'
+    });
+  });
+
+  // Team ALPHA-004 selects PS-01
+  teamRegistrationStore.set('ALPHA-004', {
+    teamId: 'ALPHA-004',
+    selectedProblemId: 'PS-01',
+    selectionDate: new Date().toISOString()
+  });
+  selectionStore.set('ALPHA-004', {
+    teamId: 'ALPHA-004',
+    problemId: 'PS-01',
+    selectedAt: new Date().toISOString()
+  });
+  problemStore.get('PS-01').selectedCount = 1;
+
+  assert(problemStore.get('PS-01').selectedCount === 1, 'PS-01 has 1 registered team initially');
+  assert(teamRegistrationStore.get('ALPHA-004').selectedProblemId === 'PS-01', 'Team ALPHA-004 is bound to PS-01');
+
+  // ADMIN DELETES PS-01
+  // Cascading simulation: Delete PS-01, remove selections for PS-01, reset team selectedProblemId
+  const deletedProbId = 'PS-01';
+  problemStore.delete(deletedProbId);
+  for (const [tid, sel] of Array.from(selectionStore.entries())) {
+    if (sel.problemId === deletedProbId) {
+      selectionStore.delete(tid);
+    }
+  }
+  for (const [tid, t] of Array.from(teamRegistrationStore.entries())) {
+    if (t.selectedProblemId === deletedProbId) {
+      t.selectedProblemId = undefined;
+      t.selectionDate = undefined;
+    }
+  }
+
+  assert(!problemStore.has('PS-01'), 'Problem PS-01 deleted from problems store');
+  assert(!selectionStore.has('ALPHA-004'), 'Selection record for ALPHA-004 purged from selections store');
+  assert(teamRegistrationStore.get('ALPHA-004').selectedProblemId === undefined, 'ALPHA-004 selectedProblemId reset to undefined');
+
+  // ADMIN ADDS PS-01 AGAIN
+  // Re-creation must start with selectedCount 0 and zero leaked registrations
+  problemStore.set('PS-01', {
+    problemId: 'PS-01',
+    title: 'Challenge 1 New Edition',
+    selectedCount: 0,
+    status: 'DRAFT'
+  });
+
+  const readdedProblem = problemStore.get('PS-01');
+  const selectionsForReadded = Array.from(selectionStore.values()).filter(s => s.problemId === 'PS-01');
+  
+  assert(readdedProblem.selectedCount === 0, 'Re-added problem PS-01 has strictly 0 registered teams');
+  assert(selectionsForReadded.length === 0, 'No orphaned selections attached to re-added problem');
+  assert(teamRegistrationStore.get('ALPHA-004').selectedProblemId === undefined, 'ALPHA-004 remains free to select new problems');
+
+  // Test participant deletion decrementing problem count
+  selectionStore.set('ALPHA-005', {
+    teamId: 'ALPHA-005',
+    problemId: 'PS-02',
+    selectedAt: new Date().toISOString()
+  });
+  problemStore.get('PS-02').selectedCount = 1;
+
+  // Admin deletes team ALPHA-005
+  const deletingTeamId = 'ALPHA-005';
+  const teamSel = selectionStore.get(deletingTeamId);
+  if (teamSel) {
+    const prob = problemStore.get(teamSel.problemId);
+    if (prob) prob.selectedCount = Math.max(0, prob.selectedCount - 1);
+    selectionStore.delete(deletingTeamId);
+  }
+
+  assert(problemStore.get('PS-02').selectedCount === 0, 'Deleting team decrements problem registration counter to 0');
+  assert(!selectionStore.has('ALPHA-005'), 'Deleted team selection completely removed');
+
+  // ===============================================================
   // SUMMARY
   // ===============================================================
   console.log('\n====================================================');

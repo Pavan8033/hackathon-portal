@@ -8,6 +8,7 @@ import {
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage, isFirebaseConfigured } from '../lib/firebase';
+import { SelectionService } from './selectionService';
 import type { ProblemRecord, ProblemInput, ProblemStatus, ParsedProblemRow } from '../types';
 
 const PROBLEMS_STORAGE_KEY = 'hackathon_portal_problems_v2';
@@ -219,6 +220,13 @@ export class ProblemService {
       fileMeta = await this.processFileUpload(input.problemId, file);
     }
 
+    // Clear any stale selection for this problem ID to guarantee fresh start
+    try {
+      await SelectionService.deleteSelectionsForProblem(input.problemId);
+    } catch {
+      // ignore
+    }
+
     const newRecord: ProblemRecord = {
       problemId: input.problemId.trim().toUpperCase(),
       title: input.title.trim(),
@@ -276,6 +284,13 @@ export class ProblemService {
         continue;
       }
       existingIds.add(normalizedId);
+
+      // Clear any stale selection for this problem ID to ensure fresh start
+      try {
+        await SelectionService.deleteSelectionsForProblem(r.problemId);
+      } catch {
+        // ignore
+      }
 
       const record: ProblemRecord = {
         problemId: r.problemId.trim().toUpperCase(),
@@ -470,18 +485,74 @@ export class ProblemService {
   }
 
   /**
-   * Delete problem permanently
+   * Delete problem permanently with full cascading cleanup of all associated team registrations
    */
   public static async deleteProblem(problemId: string): Promise<void> {
+    const cleanId = problemId.trim();
+    if (!cleanId) return;
+
+    // 1. Cascading cleanup: delete all team selections for this problem and unbind teams
+    try {
+      await SelectionService.deleteSelectionsForProblem(cleanId);
+    } catch (err) {
+      console.warn('[ProblemService] Error clearing selections for problem:', err);
+    }
+
+    // 2. Filter local problems
     const problems = await this.getAllProblems({ forParticipant: false });
-    const filtered = problems.filter((p) => p.problemId !== problemId);
+    const filtered = problems.filter(
+      (p) => p.problemId.trim().toLowerCase() !== cleanId.toLowerCase()
+    );
     this.saveLocalProblems(filtered);
 
+    // 3. Delete from Firestore
     if (isFirebaseConfigured && db) {
       try {
-        await deleteDoc(doc(db, 'problems', problemId));
+        await Promise.allSettled([
+          deleteDoc(doc(db, 'problems', cleanId)),
+          deleteDoc(doc(db, 'problems', cleanId.toUpperCase())),
+        ]);
       } catch (err) {
         console.warn('[ProblemService] Firestore delete error:', err);
+      }
+    }
+  }
+
+  /**
+   * Delete multiple problems in bulk
+   */
+  public static async deleteMultipleProblems(problemIds: string[]): Promise<number> {
+    let count = 0;
+    for (const id of problemIds) {
+      await this.deleteProblem(id);
+      count++;
+    }
+    return count;
+  }
+
+  /**
+   * Delete all problems permanently and wipe all selections
+   */
+  public static async deleteAllProblems(): Promise<void> {
+    // 1. Wipe all selections across system
+    try {
+      await SelectionService.deleteAllSelections();
+    } catch (err) {
+      console.warn('[ProblemService] Error wiping selections:', err);
+    }
+
+    // 2. Clear local storage
+    this.saveLocalProblems([]);
+
+    // 3. Wipe all problems from Firestore
+    if (isFirebaseConfigured && db) {
+      try {
+        const snap = await getDocs(collection(db, 'problems'));
+        const deletePromises: Promise<any>[] = [];
+        snap.forEach((d) => deletePromises.push(deleteDoc(d.ref).catch(() => {})));
+        await Promise.allSettled(deletePromises);
+      } catch (err) {
+        console.warn('[ProblemService] Firestore deleteAllProblems error:', err);
       }
     }
   }

@@ -9,6 +9,7 @@ import {
 import { db, isFirebaseConfigured } from '../lib/firebase';
 import { hashCredential } from '../utils/crypto';
 import { ALPHA_TEAMS_ROSTER } from '../data/alphaTeamsRoster';
+import { SelectionService } from './selectionService';
 import type { TeamRecord, ParsedTeamRow, TeamStatus } from '../types';
 
 const TEAMS_STORAGE_KEY = 'hackathon_portal_teams_v2';
@@ -810,7 +811,14 @@ export class TeamService {
     // 1. Record in deleted tombstones
     await this.recordDeletedTeamId(teamId);
 
-    // 2. Remove from local storage
+    // 2. Cascade cleanup of problem registrations and counter decrement
+    try {
+      await SelectionService.deleteSelectionForTeam(teamId);
+    } catch (err) {
+      console.warn('[TeamService] Error cleaning up team selection:', err);
+    }
+
+    // 3. Remove from local storage
     const teams = this.getLocalTeams();
     const filteredTeams = teams.filter(
       (t) => this.normalizeId(t.teamId) !== cleanId && t.teamId !== teamId
@@ -823,7 +831,7 @@ export class TeamService {
     );
     this.saveLocalParticipants(filteredParts);
 
-    // 3. Remove from Firestore: teams, participants, teamSelections
+    // 4. Remove from Firestore: teams, participants, teamSelections
     if (isFirebaseConfigured && db) {
       try {
         await Promise.allSettled([
@@ -856,6 +864,13 @@ export class TeamService {
    * Delete all teams completely
    */
   public static async deleteAllTeams(): Promise<void> {
+    // 1. Wipe all selections across system
+    try {
+      await SelectionService.deleteAllSelections();
+    } catch (err) {
+      console.warn('[TeamService] Error wiping selections:', err);
+    }
+
     const all = await this.getAllTeams();
     const allIds = new Set<string>();
 

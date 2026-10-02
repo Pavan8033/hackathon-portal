@@ -3,6 +3,8 @@ import { db, isFirebaseConfigured } from '../lib/firebase';
 import type { EventConfig } from '../types';
 import { SettingsService } from './settingsService';
 import { TeamService } from './teamService';
+import { ProblemService } from './problemService';
+import { SelectionService } from './selectionService';
 
 const EVENT_STORAGE_KEY = 'hackathon_portal_event_config_v2';
 const EVENT_CHANGE_EVENT = 'hackathon_portal_event_changed';
@@ -218,21 +220,19 @@ export class EventService {
       await TeamService.deleteAllTeams();
     }
 
-    // 2. Wipe Selections
+    // 2. Wipe Selections across system if requested
     if (deleteSelections) {
-      localStorage.removeItem('hackathon_portal_selections_v2');
-      localStorage.setItem('hackathon_portal_selections_v2', JSON.stringify([]));
+      await SelectionService.deleteAllSelections();
     }
 
     // 3. Reset or delete Problems
-    try {
-      const storedProblems = localStorage.getItem('hackathon_portal_problems_v2');
-      if (storedProblems) {
-        if (deleteProblems) {
-          localStorage.removeItem('hackathon_portal_problems_v2');
-          localStorage.setItem('hackathon_portal_problems_v2', JSON.stringify([]));
-        } else {
-          // Keep problem definitions, but reset selected counts
+    if (deleteProblems) {
+      await ProblemService.deleteAllProblems();
+    } else {
+      // Keep problem definitions, but reset selected counts
+      try {
+        const storedProblems = localStorage.getItem('hackathon_portal_problems_v2');
+        if (storedProblems) {
           const list = JSON.parse(storedProblems);
           const resetList = list.map((p: any) => ({
             ...p,
@@ -241,9 +241,9 @@ export class EventService {
           }));
           localStorage.setItem('hackathon_portal_problems_v2', JSON.stringify(resetList));
         }
+      } catch {
+        // ignore
       }
-    } catch {
-      // ignore
     }
 
     // 4. Invalidate Active Auth Sessions (All team credentials disappear and active logins are expelled immediately)

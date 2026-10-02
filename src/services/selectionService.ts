@@ -7,6 +7,8 @@ import {
   onSnapshot,
   query,
   orderBy,
+  deleteDoc,
+  updateDoc,
 } from 'firebase/firestore';
 import { db, isFirebaseConfigured } from '../lib/firebase';
 import { SettingsService } from './settingsService';
@@ -546,6 +548,259 @@ export class SelectionService {
     }
 
     return this.getLocalAuditLogs();
+  }
+
+  /**
+   * Delete selections associated with a specific problem ID
+   * Wipes selection records from Firestore teamSelections, resets team selections in teams and participants,
+   * and updates local caches.
+   */
+  public static async deleteSelectionsForProblem(problemId: string): Promise<void> {
+    const cleanProbId = problemId.trim().toLowerCase();
+    if (!cleanProbId) return;
+
+    // 1. Get all current selections
+    const allSelections = await this.getAllSelections();
+    const affected = allSelections.filter(
+      (s) => (s.problemId || '').trim().toLowerCase() === cleanProbId
+    );
+
+    const remaining = allSelections.filter(
+      (s) => (s.problemId || '').trim().toLowerCase() !== cleanProbId
+    );
+    this.saveLocalSelections(remaining);
+
+    // 2. Clear from Firestore
+    if (isFirebaseConfigured && db) {
+      try {
+        const deletePromises: Promise<any>[] = [];
+        for (const s of affected) {
+          deletePromises.push(deleteDoc(doc(db, 'teamSelections', s.teamId)).catch(() => {}));
+          deletePromises.push(deleteDoc(doc(db, 'teamSelections', TeamService.normalizeId(s.teamId))).catch(() => {}));
+          
+          // Clear selection on team doc
+          deletePromises.push(
+            updateDoc(doc(db, 'teams', s.teamId), {
+              selectedProblemId: '',
+              selectedProblemTitle: '',
+              selectionDate: '',
+              selectionStatus: 'PENDING',
+              updatedAt: new Date().toISOString(),
+            }).catch(() => {})
+          );
+          deletePromises.push(
+            updateDoc(doc(db, 'participants', s.teamId), {
+              selectedProblemId: '',
+              selectedProblemTitle: '',
+              selectionDate: '',
+              selectionStatus: 'PENDING',
+              updatedAt: new Date().toISOString(),
+            }).catch(() => {})
+          );
+        }
+        await Promise.allSettled(deletePromises);
+      } catch (err) {
+        console.warn('[SelectionService] Firestore deleteSelectionsForProblem error:', err);
+      }
+    }
+
+    // 3. Update local teams and participants
+    try {
+      const allTeams = await TeamService.getAllTeams();
+      let teamsChanged = false;
+      for (const t of allTeams) {
+        if ((t.selectedProblemId || '').trim().toLowerCase() === cleanProbId) {
+          t.selectedProblemId = undefined;
+          t.selectedProblemTitle = undefined;
+          t.selectionDate = undefined;
+          teamsChanged = true;
+        }
+      }
+      if (teamsChanged) {
+        localStorage.setItem('hackathon_portal_teams_v2', JSON.stringify(allTeams));
+        TeamService.saveLocalParticipants(allTeams);
+      }
+    } catch {
+      // ignore
+    }
+
+    // 4. Update current session if affected
+    try {
+      const activeSessionRaw = localStorage.getItem('hackathon_portal_auth_session_v2');
+      if (activeSessionRaw) {
+        const session = JSON.parse(activeSessionRaw);
+        if (session.team && (session.team.selectedProblemId || '').trim().toLowerCase() === cleanProbId) {
+          session.team.selectedProblemId = undefined;
+          session.team.selectedProblemTitle = undefined;
+          session.team.selectionDate = undefined;
+          localStorage.setItem('hackathon_portal_auth_session_v2', JSON.stringify(session));
+          sessionStorage.setItem('hackathon_portal_auth_session_v2', JSON.stringify(session));
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
+   * Delete selections associated with multiple problem IDs
+   */
+  public static async deleteSelectionsForMultipleProblems(problemIds: string[]): Promise<void> {
+    for (const id of problemIds) {
+      await this.deleteSelectionsForProblem(id);
+    }
+  }
+
+  /**
+   * Delete all selections completely across the entire system
+   */
+  public static async deleteAllSelections(): Promise<void> {
+    this.saveLocalSelections([]);
+
+    if (isFirebaseConfigured && db) {
+      try {
+        const snap = await getDocs(collection(db, 'teamSelections'));
+        const deletePromises: Promise<any>[] = [];
+        snap.forEach((d) => deletePromises.push(deleteDoc(d.ref).catch(() => {})));
+        await Promise.allSettled(deletePromises);
+      } catch (err) {
+        console.warn('[SelectionService] Firestore deleteAllSelections error:', err);
+      }
+    }
+
+    // Reset selection fields on all teams and participants in Firestore & localStorage
+    try {
+      const allTeams = await TeamService.getAllTeams();
+      for (const t of allTeams) {
+        t.selectedProblemId = undefined;
+        t.selectedProblemTitle = undefined;
+        t.selectionDate = undefined;
+      }
+      localStorage.setItem('hackathon_portal_teams_v2', JSON.stringify(allTeams));
+      TeamService.saveLocalParticipants(allTeams);
+
+      if (isFirebaseConfigured && db) {
+        const [teamsSnap, partsSnap] = await Promise.all([
+          getDocs(collection(db, 'teams')),
+          getDocs(collection(db, 'participants')),
+        ]);
+        const updatePromises: Promise<any>[] = [];
+        teamsSnap.forEach((d) => {
+          updatePromises.push(
+            updateDoc(d.ref, {
+              selectedProblemId: '',
+              selectedProblemTitle: '',
+              selectionDate: '',
+              selectionStatus: 'PENDING',
+              updatedAt: new Date().toISOString(),
+            }).catch(() => {})
+          );
+        });
+        partsSnap.forEach((d) => {
+          updatePromises.push(
+            updateDoc(d.ref, {
+              selectedProblemId: '',
+              selectedProblemTitle: '',
+              selectionDate: '',
+              selectionStatus: 'PENDING',
+              updatedAt: new Date().toISOString(),
+            }).catch(() => {})
+          );
+        });
+        await Promise.allSettled(updatePromises);
+      }
+    } catch {
+      // ignore
+    }
+
+    // Reset selectedCount on all problems in localStorage and Firestore
+    try {
+      const allProblems = await ProblemService.getAllProblems({ forParticipant: false });
+      for (const p of allProblems) {
+        p.selectedCount = 0;
+      }
+      localStorage.setItem('hackathon_portal_problems_v2', JSON.stringify(allProblems));
+
+      if (isFirebaseConfigured && db) {
+        const probSnap = await getDocs(collection(db, 'problems'));
+        const updatePromises: Promise<any>[] = [];
+        probSnap.forEach((d) => {
+          updatePromises.push(
+            updateDoc(d.ref, {
+              selectedCount: 0,
+              updatedAt: new Date().toISOString(),
+            }).catch(() => {})
+          );
+        });
+        await Promise.allSettled(updatePromises);
+      }
+    } catch {
+      // ignore
+    }
+
+    // Clear active session selection
+    try {
+      const activeSessionRaw = localStorage.getItem('hackathon_portal_auth_session_v2');
+      if (activeSessionRaw) {
+        const session = JSON.parse(activeSessionRaw);
+        if (session.team) {
+          session.team.selectedProblemId = undefined;
+          session.team.selectedProblemTitle = undefined;
+          session.team.selectionDate = undefined;
+          localStorage.setItem('hackathon_portal_auth_session_v2', JSON.stringify(session));
+          sessionStorage.setItem('hackathon_portal_auth_session_v2', JSON.stringify(session));
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
+   * Delete selection for a single team (e.g. when team is deleted) and decrement problem selectedCount
+   */
+  public static async deleteSelectionForTeam(teamId: string): Promise<void> {
+    const cleanTeamId = TeamService.normalizeId(teamId);
+    if (!cleanTeamId) return;
+
+    const allSelections = await this.getAllSelections();
+    const target = allSelections.find((s) => TeamService.normalizeId(s.teamId) === cleanTeamId);
+    const oldProblemId = target?.problemId;
+
+    const remaining = allSelections.filter((s) => TeamService.normalizeId(s.teamId) !== cleanTeamId);
+    this.saveLocalSelections(remaining);
+
+    if (isFirebaseConfigured && db) {
+      try {
+        await Promise.allSettled([
+          deleteDoc(doc(db, 'teamSelections', teamId)).catch(() => {}),
+          deleteDoc(doc(db, 'teamSelections', cleanTeamId)).catch(() => {}),
+        ]);
+      } catch (err) {
+        console.warn('[SelectionService] Firestore delete selection error:', err);
+      }
+    }
+
+    // Decrement problem selectedCount if existed
+    if (oldProblemId) {
+      try {
+        const allProblems = await ProblemService.getAllProblems({ forParticipant: false });
+        const prob = allProblems.find((p) => p.problemId.trim().toLowerCase() === oldProblemId.trim().toLowerCase());
+        if (prob) {
+          prob.selectedCount = Math.max(0, (prob.selectedCount || 1) - 1);
+          localStorage.setItem('hackathon_portal_problems_v2', JSON.stringify(allProblems));
+
+          if (isFirebaseConfigured && db) {
+            updateDoc(doc(db, 'problems', prob.problemId), {
+              selectedCount: prob.selectedCount,
+              updatedAt: new Date().toISOString(),
+            }).catch(() => {});
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
   }
 
   // -------------------------------------------------------------
