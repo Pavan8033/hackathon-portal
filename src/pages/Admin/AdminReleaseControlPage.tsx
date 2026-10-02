@@ -7,15 +7,12 @@ import {
   CheckSquare,
   Square,
   Clock,
-  Globe,
 } from 'lucide-react';
 import { AdminLayout } from '../../components/layout/AdminLayout';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
-import { CountdownTimer } from '../../components/common/CountdownTimer';
 import { ProblemService } from '../../services/problemService';
-import { SettingsService } from '../../services/settingsService';
 import { AuditService } from '../../services/auditService';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -26,17 +23,10 @@ export const AdminReleaseControlPage: React.FC = () => {
   const { admin } = useAuth();
   const { showToast } = useToast();
   const [problems, setProblems] = useState<ProblemRecord[]>([]);
-  const [, setSettings] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   // Bulk Selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-
-  // Global Release Form
-  const [globalDate, setGlobalDate] = useState('');
-  const [globalTime, setGlobalTime] = useState('10:00');
-  const [globalStatus, setGlobalStatus] = useState<'NOT_STARTED' | 'LIVE' | 'CLOSED'>('NOT_STARTED');
-  const [isSavingGlobal, setIsSavingGlobal] = useState(false);
 
   // Schedule Modal
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
@@ -63,17 +53,8 @@ export const AdminReleaseControlPage: React.FC = () => {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [allProbs, portalSettings] = await Promise.all([
-        ProblemService.getAllProblems({ forParticipant: false }),
-        SettingsService.getSettings(),
-      ]);
+      const allProbs = await ProblemService.getAllProblems({ forParticipant: false });
       setProblems(allProbs);
-      setSettings(portalSettings);
-      if (portalSettings) {
-        setGlobalDate(portalSettings.globalReleaseDate || '');
-        setGlobalTime(portalSettings.globalReleaseTime || '10:00');
-        setGlobalStatus(portalSettings.globalReleaseStatus || 'NOT_STARTED');
-      }
     } catch (err) {
       console.error('Failed to load release control data:', err);
     } finally {
@@ -336,35 +317,6 @@ export const AdminReleaseControlPage: React.FC = () => {
     });
   };
 
-  // Global Release Configuration Handler (Step 8 #9)
-  const handleSaveGlobalRelease = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSavingGlobal(true);
-    try {
-      await SettingsService.updateSettings(
-        {
-          globalReleaseDate: globalDate || undefined,
-          globalReleaseTime: globalTime || undefined,
-          globalReleaseStatus: globalStatus,
-        },
-        admin?.email || 'admin'
-      );
-      await AuditService.logAction({
-        action: 'UPDATE_SETTINGS',
-        adminId: admin?.email || 'admin',
-        details: `Updated global release event: status=${globalStatus}, date=${globalDate}, time=${globalTime}`,
-      });
-      showToast('Global release configuration updated successfully.', 'success');
-      await loadData();
-    } catch (err: any) {
-      showToast(err?.message || 'Failed to update global release.', 'error');
-    } finally {
-      setIsSavingGlobal(false);
-    }
-  };
-
-  const globalReleaseTimestamp = globalDate ? `${globalDate}T${globalTime || '10:00'}:00` : '';
-
   return (
     <AdminLayout
       title="RELEASE CONTROL DASHBOARD"
@@ -421,105 +373,7 @@ export const AdminReleaseControlPage: React.FC = () => {
         </div>
       </div>
 
-      {/* 2. GLOBAL RELEASE CONFIGURATION & COUNTDOWN PREVIEW (Step 8 #9) */}
-      <div className="bg-white rounded-2xl border border-[#E5E7EB] p-6 sm:p-7 shadow-xs mb-8">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#F3F4F6] mb-5">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#EEF5F0] text-[#164A36] flex items-center justify-center shrink-0">
-              <Globe className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-lg font-bold text-[#111827]">
-                Global Problem Release Event
-              </h2>
-              <p className="text-xs text-[#667085]">
-                Configure event-wide unlock schedule and participant banner countdown.
-              </p>
-            </div>
-          </div>
-
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#F7F5EF] text-xs font-semibold border border-[#E5E7EB]">
-            <span className="text-[#667085]">Current Status:</span>
-            <span className="font-bold text-[#164A36]">{globalStatus}</span>
-          </div>
-        </div>
-
-        <form onSubmit={handleSaveGlobalRelease} className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-[#111827] mb-1">
-                Release Date
-              </label>
-              <input
-                type="date"
-                value={globalDate}
-                onChange={(e) => setGlobalDate(e.target.value)}
-                className="w-full px-3.5 py-2 text-sm rounded-lg border border-[#E5E7EB] bg-white text-[#111827] focus:outline-none focus:ring-2 focus:ring-[#164A36]"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-[#111827] mb-1">
-                Release Time (IST)
-              </label>
-              <input
-                type="time"
-                value={globalTime}
-                onChange={(e) => setGlobalTime(e.target.value)}
-                className="w-full px-3.5 py-2 text-sm rounded-lg border border-[#E5E7EB] bg-white text-[#111827] focus:outline-none focus:ring-2 focus:ring-[#164A36]"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-[#111827] mb-1">
-                Release Event Status
-              </label>
-              <select
-                value={globalStatus}
-                onChange={(e) => setGlobalStatus(e.target.value as any)}
-                className="w-full px-3.5 py-2 text-sm rounded-lg border border-[#E5E7EB] bg-white text-[#111827] focus:outline-none focus:ring-2 focus:ring-[#164A36]"
-              >
-                <option value="NOT_STARTED">NOT STARTED (Show Countdown)</option>
-                <option value="LIVE">LIVE (Release Active)</option>
-                <option value="CLOSED">CLOSED (Selection Ended)</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between pt-2">
-            <span className="text-xs text-[#667085]">
-              Timezone: <strong className="text-[#111827]">Asia/Kolkata (IST)</strong>
-            </span>
-            <Button
-              type="submit"
-              variant="primary"
-              size="sm"
-              disabled={isSavingGlobal}
-            >
-              {isSavingGlobal ? 'Saving...' : 'Update Global Release Settings'}
-            </Button>
-          </div>
-        </form>
-
-        {/* Live Countdown Preview if configured */}
-        {globalReleaseTimestamp && globalStatus === 'NOT_STARTED' && (
-          <div className="mt-5 pt-4 border-t border-[#F3F4F6]">
-            <p className="text-xs font-bold uppercase tracking-wider text-[#667085] mb-2">
-              Participant Countdown Preview:
-            </p>
-            <CountdownTimer
-              targetDate={globalReleaseTimestamp}
-              label="PROBLEM STATEMENTS RELEASE IN"
-              onExpire={() => {
-                showToast('Global release countdown reached zero.', 'info');
-                loadData();
-              }}
-            />
-          </div>
-        )}
-      </div>
-
-      {/* 3. BULK RELEASE TOOLBAR & MANAGEMENT TABLE (Step 8 #5) */}
+      {/* 2. RELEASE MANAGEMENT & BULK CONTROLS */}
       <div className="bg-white rounded-2xl border border-[#E5E7EB] overflow-hidden shadow-xs">
         {/* Bulk Action Header */}
         <div className="p-4 sm:p-5 bg-[#F7F5EF] border-b border-[#E5E7EB] flex flex-wrap items-center justify-between gap-4">

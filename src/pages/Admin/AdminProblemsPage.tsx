@@ -54,6 +54,11 @@ export const AdminProblemsPage: React.FC = () => {
   const [problemToDelete, setProblemToDelete] = useState<ProblemRecord | null>(null);
   const [problemToTogglePublish, setProblemToTogglePublish] = useState<ProblemRecord | null>(null);
 
+  // Bulk Selection and Multi-action State
+  const [selectedProblemIds, setSelectedProblemIds] = useState<Set<string>>(new Set());
+  const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
+  const [isDeletingBulk, setIsDeletingBulk] = useState(false);
+
   const loadData = async () => {
     setIsLoading(true);
     try {
@@ -117,6 +122,58 @@ export const AdminProblemsPage: React.FC = () => {
     );
     setProblemToDelete(null);
     await loadData();
+  };
+
+  // Bulk Selection Helpers & Bulk Actions
+  const handleToggleSelectAll = () => {
+    if (selectedProblemIds.size === filteredProblems.length && filteredProblems.length > 0) {
+      setSelectedProblemIds(new Set());
+    } else {
+      setSelectedProblemIds(new Set(filteredProblems.map((p) => p.problemId)));
+    }
+  };
+
+  const handleToggleRow = (problemId: string) => {
+    setSelectedProblemIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(problemId)) next.delete(problemId);
+      else next.add(problemId);
+      return next;
+    });
+  };
+
+  const handleBulkDeleteConfirm = async () => {
+    if (selectedProblemIds.size === 0) return;
+    setIsDeletingBulk(true);
+    try {
+      const idsToDelete = Array.from(selectedProblemIds);
+      for (const id of idsToDelete) {
+        await ProblemService.deleteProblem(id);
+      }
+      showToast(`Successfully deleted ${idsToDelete.length} problems.`, 'success', 'Bulk Delete Completed');
+      setSelectedProblemIds(new Set());
+      setIsBulkDeleteModalOpen(false);
+      await loadData();
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to delete selected problems.', 'error', 'Delete Error');
+    } finally {
+      setIsDeletingBulk(false);
+    }
+  };
+
+  const handleBulkStatusChange = async (newStatus: ProblemStatus) => {
+    if (selectedProblemIds.size === 0) return;
+    try {
+      const ids = Array.from(selectedProblemIds);
+      for (const id of ids) {
+        await ProblemService.updateProblemStatus(id, newStatus);
+      }
+      showToast(`Updated ${ids.length} problems to ${newStatus}.`, 'success', 'Status Updated');
+      setSelectedProblemIds(new Set());
+      await loadData();
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to update problem statuses.', 'error', 'Status Error');
+    }
   };
 
   const filteredProblems = problems.filter((p) => {
@@ -292,12 +349,67 @@ export const AdminProblemsPage: React.FC = () => {
         </div>
       </div>
 
+      {/* Bulk Action Bar (when 1 or more problems are selected) */}
+      {selectedProblemIds.size > 0 && (
+        <div className="p-4 bg-[#EEF5F0] border border-[#D5E6DB] rounded-2xl flex flex-wrap items-center justify-between gap-3 text-xs mb-4 shadow-xs">
+          <div className="flex items-center gap-3">
+            <span className="font-extrabold text-[#164A36] bg-white px-3 py-1.5 rounded-lg border border-[#D5E6DB]">
+              {selectedProblemIds.size} of {filteredProblems.length} Problems Selected
+            </span>
+            <button
+              type="button"
+              onClick={() => setSelectedProblemIds(new Set())}
+              className="text-[#667085] hover:text-[#111827] font-semibold underline"
+            >
+              Deselect All
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleBulkStatusChange('PUBLISHED')}
+              className="text-emerald-700 border-emerald-300 hover:bg-emerald-50 font-bold"
+            >
+              <Globe className="w-3.5 h-3.5 mr-1.5" />
+              Publish Selected
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleBulkStatusChange('DRAFT')}
+              className="text-amber-700 border-amber-300 hover:bg-amber-50 font-bold"
+            >
+              Move to Draft
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsBulkDeleteModalOpen(true)}
+              className="text-rose-700 border-rose-300 hover:bg-rose-50 font-bold"
+            >
+              <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+              Delete Selected ({selectedProblemIds.size})
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Main Problems Table (Sections 26 & 27) */}
       <div className="bg-white rounded-2xl border border-[#E5E7EB] overflow-hidden shadow-xs">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs sm:text-sm">
             <thead className="bg-[#F7F5EF] border-b border-[#E5E7EB] text-[#4B5563] uppercase text-[11px] font-bold tracking-wider">
               <tr>
+                <th className="px-4 py-3.5 w-12 text-center">
+                  <input
+                    type="checkbox"
+                    aria-label="Select All"
+                    checked={selectedProblemIds.size > 0 && selectedProblemIds.size === filteredProblems.length}
+                    onChange={handleToggleSelectAll}
+                    className="w-4 h-4 rounded border-[#D1D5DB] text-[#164A36] focus:ring-[#164A36] cursor-pointer"
+                  />
+                </th>
                 <th className="px-5 py-3.5">Problem ID</th>
                 <th className="px-5 py-3.5">Title</th>
                 <th className="px-5 py-3.5">Category</th>
@@ -312,13 +424,13 @@ export const AdminProblemsPage: React.FC = () => {
             <tbody className="divide-y divide-[#E5E7EB] text-[#111827]">
               {isLoading ? (
                 <tr>
-                  <td colSpan={9} className="px-5 py-12 text-center text-[#667085]">
+                  <td colSpan={10} className="px-5 py-12 text-center text-[#667085]">
                     Loading problem statements...
                   </td>
                 </tr>
               ) : filteredProblems.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-5 py-12 text-center text-[#667085]">
+                  <td colSpan={10} className="px-5 py-12 text-center text-[#667085]">
                     {searchQuery
                       ? 'No problems match your search.'
                       : 'No problem statements created yet. Click "Add Problem Statement" above to create one.'}
@@ -335,9 +447,26 @@ export const AdminProblemsPage: React.FC = () => {
 
                   const problemSelections = selectionMap.get(p.problemId) || [];
                   const selectionCount = problemSelections.length;
+                  const isSelected = selectedProblemIds.has(p.problemId);
 
                   return (
-                    <tr key={p.problemId} className="hover:bg-[#F7F5EF]/50 transition-colors">
+                    <tr
+                      key={p.problemId}
+                      className={`hover:bg-[#F7F5EF]/50 transition-colors ${
+                        isSelected ? 'bg-[#EEF5F0]/60' : ''
+                      }`}
+                    >
+                      {/* Selection Checkbox */}
+                      <td className="px-4 py-4 w-12 text-center">
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${p.problemId}`}
+                          checked={isSelected}
+                          onChange={() => handleToggleRow(p.problemId)}
+                          className="w-4 h-4 rounded border-[#D1D5DB] text-[#164A36] focus:ring-[#164A36] cursor-pointer"
+                        />
+                      </td>
+
                       {/* Problem ID */}
                       <td className="px-5 py-4 font-mono font-bold text-xs text-[#164A36]">
                         <button
@@ -889,6 +1018,17 @@ export const AdminProblemsPage: React.FC = () => {
         isDangerous
         onCancel={() => setProblemToDelete(null)}
         onConfirm={handleDeleteConfirm}
+      />
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={isBulkDeleteModalOpen}
+        title={`Delete ${selectedProblemIds.size} Selected Problems?`}
+        message={`Are you sure you want to permanently delete all ${selectedProblemIds.size} selected problem statements? Any team selections associated with these problems will also be impacted. This action cannot be undone.`}
+        confirmText={isDeletingBulk ? 'Deleting...' : `Delete ${selectedProblemIds.size} Problems`}
+        isDangerous
+        onCancel={() => setIsBulkDeleteModalOpen(false)}
+        onConfirm={handleBulkDeleteConfirm}
       />
     </AdminLayout>
   );

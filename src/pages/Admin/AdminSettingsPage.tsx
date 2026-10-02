@@ -85,6 +85,8 @@ export const AdminSettingsPage: React.FC = () => {
     setClubLogo(eventConfig.clubLogo || '');
     setEventBanner(eventConfig.eventBanner || '');
     setProblemSelectionLimit(eventConfig.problemSelectionLimit || 2);
+    if (eventConfig.contactEmail) setSupportEmail(eventConfig.contactEmail);
+    if (eventConfig.supportHours) setSupportHours(eventConfig.supportHours);
   }, [eventConfig]);
 
   // Image Upload Converters to Data URLs
@@ -115,19 +117,21 @@ export const AdminSettingsPage: React.FC = () => {
   const handleSaveEventConfig = async () => {
     setIsSaving(true);
     try {
-      updateEventConfig({
+      await updateEventConfig({
         eventName: eventName.trim() || 'Hackathon Portal',
         clubName: clubName.trim() || 'Student Chapter',
         clubLogo: clubLogo.trim(),
         eventBanner: eventBanner.trim(),
         problemSelectionLimit: Math.max(1, Number(problemSelectionLimit) || 2),
+        contactEmail: supportEmail.trim(),
+        supportHours: supportHours.trim(),
       });
 
       await SettingsService.updateSettings({
         problemSelectionLimit: Math.max(1, Number(problemSelectionLimit) || 2),
       }, admin?.email || 'admin');
 
-      showToast('Event configuration, branding, and team selection limits updated.', 'success', 'Event Saved');
+      showToast('Event configuration, branding, and team selection limits updated and saved permanently.', 'success', 'Event Saved');
     } catch (err: any) {
       showToast(err?.message || 'Failed to save event configuration.', 'error', 'Error');
     } finally {

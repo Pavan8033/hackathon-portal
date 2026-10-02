@@ -8,8 +8,6 @@ import {
   ArrowLeft,
   KeyRound,
   CheckCircle2,
-  Eye,
-  EyeOff,
 } from 'lucide-react';
 import { Navbar } from '../../components/layout/Navbar';
 import { Footer } from '../../components/layout/Footer';
@@ -17,13 +15,11 @@ import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { useAuth } from '../../context/AuthContext';
 import { TeamService } from '../../services/teamService';
-import { maskRegistrationNumber } from '../../utils/formatters';
 import type { TeamRecord } from '../../types';
 
 export const TeamProfilePage: React.FC = () => {
   const { team } = useAuth();
   const [teamDetails, setTeamDetails] = useState<TeamRecord | null>(team || null);
-  const [showReg, setShowReg] = useState(false);
 
   useEffect(() => {
     const loadProfile = async () => {
@@ -39,8 +35,6 @@ export const TeamProfilePage: React.FC = () => {
   }, [team?.teamId]);
 
   const currentTeam = teamDetails || team;
-  const maskedReg = maskRegistrationNumber(currentTeam?.teamLeadRegistrationNumber);
-  const rawReg = currentTeam?.teamLeadRegistrationNumber || currentTeam?.teamId || '';
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F7F5EF]">
@@ -91,7 +85,7 @@ export const TeamProfilePage: React.FC = () => {
             </div>
           </div>
 
-          {/* Section 13 Fields Grid: Team Name, Team ID, Team Lead, Registration Number (Masked), Email, Phone */}
+          {/* Section 13 Fields Grid: Team Name, Team ID, Team Lead, Institution, Email, Phone */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 mt-6">
             {/* Team Name */}
             <div className="p-4 rounded-xl bg-[#F7F5EF]/70 border border-[#E5E7EB]">
@@ -99,7 +93,7 @@ export const TeamProfilePage: React.FC = () => {
                 Team Name
               </span>
               <span className="text-base font-bold text-[#111827] mt-1 block truncate">
-                {currentTeam?.teamName || 'Team Alpha'}
+                {currentTeam?.teamName || (currentTeam?.teamId ? `Team ${currentTeam.teamId}` : 'Team Alpha')}
               </span>
             </div>
 
@@ -119,27 +113,21 @@ export const TeamProfilePage: React.FC = () => {
                 Team Lead
               </span>
               <span className="text-base font-bold text-[#111827] mt-1 block truncate">
-                {currentTeam?.teamLeadName || 'John Doe'}
+                {currentTeam?.teamLeadName && currentTeam.teamLeadName.toLowerCase() !== 'team lead'
+                  ? currentTeam.teamLeadName
+                  : 'Leader (Pending Roster)'}
               </span>
             </div>
 
-            {/* Registration Number — with reveal/hide toggle */}
+            {/* Institution / College */}
             <div className="p-4 rounded-xl bg-[#F7F5EF]/70 border border-[#E5E7EB]">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-[#667085] uppercase tracking-wider block">
-                  Registration Number
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setShowReg(!showReg)}
-                  className="text-[10px] text-[#164A36] font-bold uppercase inline-flex items-center gap-1 hover:underline"
-                >
-                  {showReg ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                  <span>{showReg ? 'Hide' : 'Reveal'}</span>
-                </button>
-              </div>
-              <span className="font-mono text-base font-bold text-[#111827] mt-1 block tracking-wider">
-                {showReg ? rawReg : maskedReg}
+              <span className="text-[11px] font-bold text-[#667085] uppercase tracking-wider block">
+                Institution
+              </span>
+              <span className="text-sm font-semibold text-[#111827] mt-1 block truncate">
+                {currentTeam?.college && currentTeam.college.toLowerCase() !== 'participant institution'
+                  ? currentTeam.college
+                  : 'Enrolled Hackathon Team'}
               </span>
             </div>
 

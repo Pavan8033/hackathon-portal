@@ -51,6 +51,11 @@ export const AdminParticipantsPage: React.FC = () => {
   // Delete Confirm Dialog
   const [teamToDelete, setTeamToDelete] = useState<TeamRecord | null>(null);
 
+  // Bulk Selection and Multi-action State
+  const [selectedTeamIds, setSelectedTeamIds] = useState<Set<string>>(new Set());
+  const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
+  const [isDeletingBulk, setIsDeletingBulk] = useState(false);
+
   const loadTeams = async () => {
     setIsLoading(true);
     const data = await TeamService.getAllTeams();
@@ -148,6 +153,58 @@ export const AdminParticipantsPage: React.FC = () => {
     showToast(`Team "${teamToDelete.teamName}" removed.`, 'info', 'Team Removed');
     setTeamToDelete(null);
     await loadTeams();
+  };
+
+  // Bulk Selection Helpers & Bulk Actions
+  const handleToggleSelectAll = () => {
+    if (selectedTeamIds.size === filteredTeams.length && filteredTeams.length > 0) {
+      setSelectedTeamIds(new Set());
+    } else {
+      setSelectedTeamIds(new Set(filteredTeams.map((t) => t.teamId)));
+    }
+  };
+
+  const handleToggleRow = (teamId: string) => {
+    setSelectedTeamIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(teamId)) next.delete(teamId);
+      else next.add(teamId);
+      return next;
+    });
+  };
+
+  const handleBulkDeleteConfirm = async () => {
+    if (selectedTeamIds.size === 0) return;
+    setIsDeletingBulk(true);
+    try {
+      const idsToDelete = Array.from(selectedTeamIds);
+      for (const id of idsToDelete) {
+        await TeamService.deleteTeam(id);
+      }
+      showToast(`Successfully removed ${idsToDelete.length} teams.`, 'success', 'Bulk Delete Completed');
+      setSelectedTeamIds(new Set());
+      setIsBulkDeleteModalOpen(false);
+      await loadTeams();
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to remove selected teams.', 'error', 'Delete Error');
+    } finally {
+      setIsDeletingBulk(false);
+    }
+  };
+
+  const handleBulkToggleStatus = async (newStatus: 'active' | 'inactive') => {
+    if (selectedTeamIds.size === 0) return;
+    try {
+      const ids = Array.from(selectedTeamIds);
+      for (const id of ids) {
+        await TeamService.updateTeamStatus(id, newStatus);
+      }
+      showToast(`Updated ${ids.length} teams to ${newStatus.toUpperCase()}.`, 'success', 'Status Updated');
+      setSelectedTeamIds(new Set());
+      await loadTeams();
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to update teams status.', 'error', 'Status Error');
+    }
   };
 
   // Export Teams to CSV per Phase 30
@@ -271,12 +328,68 @@ export const AdminParticipantsPage: React.FC = () => {
         </div>
       </div>
 
+      {/* Bulk Action Bar (when 1 or more teams are selected) */}
+      {selectedTeamIds.size > 0 && (
+        <div className="p-4 bg-[#EEF5F0] border border-[#D5E6DB] rounded-2xl flex flex-wrap items-center justify-between gap-3 text-xs mb-4 shadow-xs">
+          <div className="flex items-center gap-3">
+            <span className="font-extrabold text-[#164A36] bg-white px-3 py-1.5 rounded-lg border border-[#D5E6DB]">
+              {selectedTeamIds.size} of {filteredTeams.length} Teams Selected
+            </span>
+            <button
+              type="button"
+              onClick={() => setSelectedTeamIds(new Set())}
+              className="text-[#667085] hover:text-[#111827] font-semibold underline"
+            >
+              Deselect All
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleBulkToggleStatus('active')}
+              className="text-emerald-700 border-emerald-300 hover:bg-emerald-50 font-bold"
+            >
+              <UserCheck className="w-3.5 h-3.5 mr-1.5" />
+              Activate Selected
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleBulkToggleStatus('inactive')}
+              className="text-amber-700 border-amber-300 hover:bg-amber-50 font-bold"
+            >
+              <UserX className="w-3.5 h-3.5 mr-1.5" />
+              Deactivate Selected
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsBulkDeleteModalOpen(true)}
+              className="text-rose-700 border-rose-300 hover:bg-rose-50 font-bold"
+            >
+              <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+              Delete Selected ({selectedTeamIds.size})
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Main Teams Table per Part 7 */}
       <div className="bg-white rounded-2xl border border-[#E5E7EB] overflow-hidden shadow-xs">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs sm:text-sm">
             <thead className="bg-[#F7F5EF] border-b border-[#E5E7EB] text-[#4B5563] uppercase text-[11px] font-bold tracking-wider">
               <tr>
+                <th className="px-4 py-3.5 w-12 text-center">
+                  <input
+                    type="checkbox"
+                    aria-label="Select All"
+                    checked={selectedTeamIds.size > 0 && selectedTeamIds.size === filteredTeams.length}
+                    onChange={handleToggleSelectAll}
+                    className="w-4 h-4 rounded border-[#D1D5DB] text-[#164A36] focus:ring-[#164A36] cursor-pointer"
+                  />
+                </th>
                 <th className="px-5 py-3.5">Team</th>
                 <th className="px-5 py-3.5">Team Lead</th>
                 <th className="px-5 py-3.5">Registration Number</th>
@@ -289,21 +402,39 @@ export const AdminParticipantsPage: React.FC = () => {
             <tbody className="divide-y divide-[#E5E7EB] text-[#111827]">
               {isLoading ? (
                 <tr>
-                  <td colSpan={7} className="px-5 py-12 text-center text-[#667085]">
+                  <td colSpan={8} className="px-5 py-12 text-center text-[#667085]">
                     Loading registered teams...
                   </td>
                 </tr>
               ) : filteredTeams.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-5 py-12 text-center text-[#667085]">
+                  <td colSpan={8} className="px-5 py-12 text-center text-[#667085]">
                     {searchQuery
                       ? 'No teams match your search criteria.'
                       : 'No participant teams have been imported yet. Click "Import Participants" above to add your Excel or CSV list.'}
                   </td>
                 </tr>
               ) : (
-                filteredTeams.map((t) => (
-                  <tr key={t.teamId} className="hover:bg-[#F7F5EF]/50 transition-colors">
+                filteredTeams.map((t) => {
+                  const isSelected = selectedTeamIds.has(t.teamId);
+                  return (
+                  <tr
+                    key={t.teamId}
+                    className={`hover:bg-[#F7F5EF]/50 transition-colors ${
+                      isSelected ? 'bg-[#EEF5F0]/60' : ''
+                    }`}
+                  >
+                    {/* Row Selection Checkbox */}
+                    <td className="px-4 py-4 w-12 text-center">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${t.teamId}`}
+                        checked={isSelected}
+                        onChange={() => handleToggleRow(t.teamId)}
+                        className="w-4 h-4 rounded border-[#D1D5DB] text-[#164A36] focus:ring-[#164A36] cursor-pointer"
+                      />
+                    </td>
+
                     {/* Team */}
                     <td className="px-5 py-4">
                       <Link
@@ -424,7 +555,8 @@ export const AdminParticipantsPage: React.FC = () => {
                       </div>
                     </td>
                   </tr>
-                ))
+                );
+              })
               )}
             </tbody>
           </table>
@@ -783,6 +915,17 @@ export const AdminParticipantsPage: React.FC = () => {
         isDangerous
         onCancel={() => setTeamToDelete(null)}
         onConfirm={handleDeleteConfirm}
+      />
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={isBulkDeleteModalOpen}
+        title={`Remove ${selectedTeamIds.size} Selected Teams?`}
+        message={`Are you sure you want to permanently remove all ${selectedTeamIds.size} selected teams from the hackathon directory? All their associated data will be deleted. This action cannot be undone.`}
+        confirmText={isDeletingBulk ? 'Deleting...' : `Remove ${selectedTeamIds.size} Teams`}
+        isDangerous
+        onCancel={() => setIsBulkDeleteModalOpen(false)}
+        onConfirm={handleBulkDeleteConfirm}
       />
     </AdminLayout>
   );

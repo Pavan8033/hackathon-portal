@@ -24,23 +24,31 @@ export const DEFAULT_EVENT_CONFIG: EventConfig = {
 };
 
 export class EventService {
+  private static memoryEventConfig: EventConfig | null = null;
+
   /**
    * Get the active event configuration
    */
   public static getEventConfig(): EventConfig {
+    if (this.memoryEventConfig) {
+      return this.memoryEventConfig;
+    }
     try {
       const stored = localStorage.getItem(EVENT_STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
-        return {
+        const resolved = {
           ...DEFAULT_EVENT_CONFIG,
           ...parsed,
           problemSelectionLimit: Number(parsed.problemSelectionLimit) || DEFAULT_EVENT_CONFIG.problemSelectionLimit,
         };
+        this.memoryEventConfig = resolved;
+        return resolved;
       }
     } catch {
       // ignore
     }
+    this.memoryEventConfig = DEFAULT_EVENT_CONFIG;
     return DEFAULT_EVENT_CONFIG;
   }
 
@@ -59,6 +67,8 @@ export class EventService {
         : current.problemSelectionLimit,
       updatedAt: new Date().toISOString(),
     };
+
+    this.memoryEventConfig = updated;
 
     try {
       localStorage.setItem(EVENT_STORAGE_KEY, JSON.stringify(updated));

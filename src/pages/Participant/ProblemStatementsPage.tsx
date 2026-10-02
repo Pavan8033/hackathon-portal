@@ -11,6 +11,7 @@ import {
   ArrowUpDown,
   BookOpen,
   Compass,
+  Clock,
 } from 'lucide-react';
 import { Navbar } from '../../components/layout/Navbar';
 import { Footer } from '../../components/layout/Footer';
@@ -454,6 +455,9 @@ export const ProblemStatementsPage: React.FC = () => {
               const selectedCount = prob.selectedCount || 0;
               const isFull = selectedCount >= limit;
               const remainingSlots = Math.max(0, limit - selectedCount);
+              const isScheduled =
+                prob.status === 'SCHEDULED' &&
+                (!prob.releaseAt || new Date(prob.releaseAt).getTime() > Date.now());
 
               return (
                 <div
@@ -466,13 +470,20 @@ export const ProblemStatementsPage: React.FC = () => {
                       <span className="font-mono text-xs font-bold text-[#164A36] bg-[#EEF5F0] px-2.5 py-1 rounded-md border border-[#D5E6DB]">
                         {prob.problemId}
                       </span>
-                      <span
-                        className={`text-[11px] font-semibold px-2 py-0.5 rounded border ${
-                          difficultyVariants[prob.difficulty] || 'bg-gray-50 text-gray-700 border-gray-200'
-                        }`}
-                      >
-                        {prob.difficulty}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        {isScheduled && (
+                          <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300">
+                            SCHEDULED
+                          </span>
+                        )}
+                        <span
+                          className={`text-[11px] font-semibold px-2 py-0.5 rounded border ${
+                            difficultyVariants[prob.difficulty] || 'bg-gray-50 text-gray-700 border-gray-200'
+                          }`}
+                        >
+                          {prob.difficulty}
+                        </span>
+                      </div>
                     </div>
 
                     {/* Domain Category & Capacity Slot Status */}
@@ -480,7 +491,12 @@ export const ProblemStatementsPage: React.FC = () => {
                       <span className="text-[11px] font-bold text-[#667085] uppercase tracking-wider block">
                         {prob.category}
                       </span>
-                      {isFull ? (
+                      {isScheduled ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200 shrink-0">
+                          <Clock className="w-3 h-3 text-amber-600" />
+                          Preview Mode
+                        </span>
+                      ) : isFull ? (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200 shrink-0">
                           <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
                           Capacity Full ({limit}/{limit})
@@ -526,9 +542,13 @@ export const ProblemStatementsPage: React.FC = () => {
 
                     <Link
                       to={`/participant/problem/${prob.problemId}`}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#164A36] text-white text-xs font-bold hover:bg-[#0E3324] shadow-2xs transition-colors shrink-0"
+                      className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold shadow-2xs transition-colors shrink-0 ${
+                        isScheduled
+                          ? 'bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200'
+                          : 'bg-[#164A36] text-white hover:bg-[#0E3324]'
+                      }`}
                     >
-                      <span>VIEW DETAILS</span>
+                      <span>{isScheduled ? 'PREVIEW CHALLENGE' : 'VIEW DETAILS'}</span>
                       <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
                     </Link>
                   </div>

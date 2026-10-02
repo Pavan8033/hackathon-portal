@@ -67,11 +67,40 @@ export class ProblemService {
     }
 
     if (options.forParticipant) {
-      // Exclude DRAFT, SCHEDULED, ARCHIVED from participants
-      return allProblems.filter((p) => p.status === 'PUBLISHED');
+      // Participants can view PUBLISHED challenges, and can ALSO preview SCHEDULED challenges prior to selection unlock
+      return allProblems.filter((p) => p.status === 'PUBLISHED' || p.status === 'SCHEDULED');
     }
 
     return allProblems;
+  }
+
+  /**
+   * Helper to check if a problem is locked by a schedule countdown
+   */
+  public static isProblemLockedBySchedule(problem: ProblemRecord | null | undefined): {
+    isLocked: boolean;
+    releaseAt?: string;
+    remainingMs: number;
+  } {
+    if (!problem) return { isLocked: false, remainingMs: 0 };
+    if (problem.status !== 'SCHEDULED') {
+      return { isLocked: false, remainingMs: 0 };
+    }
+    if (!problem.releaseAt) {
+      // Scheduled without a specific date/time is locked until admin publishes
+      return { isLocked: true, remainingMs: Infinity };
+    }
+    const releaseTime = new Date(problem.releaseAt).getTime();
+    const now = Date.now();
+    if (isNaN(releaseTime) || now >= releaseTime) {
+      // Release timestamp reached - challenge is unlocked!
+      return { isLocked: false, releaseAt: problem.releaseAt, remainingMs: 0 };
+    }
+    return {
+      isLocked: true,
+      releaseAt: problem.releaseAt,
+      remainingMs: releaseTime - now,
+    };
   }
 
   /**
@@ -87,27 +116,34 @@ export class ProblemService {
 
   /**
    * Check problem availability specifically for participant detail view.
-   * Distinguishes between "not found" vs "found but not published (draft/scheduled/archived)"
+   * Participants can review both PUBLISHED and SCHEDULED problems.
    */
   public static async getProblemForParticipant(
     problemId: string
   ): Promise<{
     found: boolean;
     isPublished: boolean;
+    isScheduled: boolean;
     problem: ProblemRecord | null;
   }> {
     const all = await this.getAllProblems({ forParticipant: false });
     const match = all.find((p) => p.problemId.toLowerCase() === problemId.trim().toLowerCase());
 
     if (!match) {
-      return { found: false, isPublished: false, problem: null };
+      return { found: false, isPublished: false, isScheduled: false, problem: null };
     }
 
-    if (match.status !== 'PUBLISHED') {
-      return { found: true, isPublished: false, problem: null };
+    if (match.status !== 'PUBLISHED' && match.status !== 'SCHEDULED') {
+      // DRAFT or ARCHIVED - hidden from participants
+      return { found: true, isPublished: false, isScheduled: false, problem: null };
     }
 
-    return { found: true, isPublished: true, problem: match };
+    return {
+      found: true,
+      isPublished: match.status === 'PUBLISHED',
+      isScheduled: match.status === 'SCHEDULED',
+      problem: match,
+    };
   }
 
   /**

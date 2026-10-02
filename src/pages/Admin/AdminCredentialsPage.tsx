@@ -65,6 +65,11 @@ export const AdminCredentialsPage: React.FC = () => {
   // Delete Confirm Dialog
   const [teamToDelete, setTeamToDelete] = useState<TeamRecord | null>(null);
 
+  // Bulk Selection and Multi-action State
+  const [selectedTeamIds, setSelectedTeamIds] = useState<Set<string>>(new Set());
+  const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
+  const [isDeletingBulk, setIsDeletingBulk] = useState(false);
+
   const loadData = async () => {
     setIsLoading(true);
     const data = await TeamService.getAllTeams();
@@ -302,6 +307,43 @@ export const AdminCredentialsPage: React.FC = () => {
     return matchesSearch && matchesFilter;
   });
 
+  // Bulk Selection Helpers & Bulk Delete
+  const handleToggleSelectAll = () => {
+    if (selectedTeamIds.size === filteredTeams.length && filteredTeams.length > 0) {
+      setSelectedTeamIds(new Set());
+    } else {
+      setSelectedTeamIds(new Set(filteredTeams.map((t) => t.teamId)));
+    }
+  };
+
+  const handleToggleRow = (teamId: string) => {
+    setSelectedTeamIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(teamId)) next.delete(teamId);
+      else next.add(teamId);
+      return next;
+    });
+  };
+
+  const handleBulkDeleteConfirm = async () => {
+    if (selectedTeamIds.size === 0) return;
+    setIsDeletingBulk(true);
+    try {
+      const idsToDelete = Array.from(selectedTeamIds);
+      for (const id of idsToDelete) {
+        await TeamService.deleteTeam(id);
+      }
+      showToast(`Successfully deleted ${idsToDelete.length} credentials.`, 'success', 'Bulk Delete Completed');
+      setSelectedTeamIds(new Set());
+      setIsBulkDeleteModalOpen(false);
+      await loadData();
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to delete selected credentials.', 'error', 'Error');
+    } finally {
+      setIsDeletingBulk(false);
+    }
+  };
+
   return (
     <AdminLayout
       title="TEAM LOGIN CREDENTIALS"
@@ -494,12 +536,50 @@ export const AdminCredentialsPage: React.FC = () => {
         </div>
       </div>
 
+      {/* Bulk Action Bar (when 1 or more credentials are selected) */}
+      {selectedTeamIds.size > 0 && (
+        <div className="p-4 bg-[#EEF5F0] border border-[#D5E6DB] rounded-2xl flex flex-wrap items-center justify-between gap-3 text-xs mb-4 shadow-xs">
+          <div className="flex items-center gap-3">
+            <span className="font-extrabold text-[#164A36] bg-white px-3 py-1.5 rounded-lg border border-[#D5E6DB]">
+              {selectedTeamIds.size} of {filteredTeams.length} Credentials Selected
+            </span>
+            <button
+              type="button"
+              onClick={() => setSelectedTeamIds(new Set())}
+              className="text-[#667085] hover:text-[#111827] font-semibold underline"
+            >
+              Deselect All
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsBulkDeleteModalOpen(true)}
+              className="text-rose-700 border-rose-300 hover:bg-rose-50 font-bold"
+            >
+              <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+              Delete Selected ({selectedTeamIds.size})
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Credentials Table */}
       <div className="bg-white rounded-2xl border border-[#E5E7EB] overflow-hidden shadow-xs">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs sm:text-sm">
             <thead className="bg-[#F7F5EF] border-b border-[#E5E7EB] text-[#4B5563] uppercase text-[11px] font-bold tracking-wider">
               <tr>
+                <th className="px-4 py-3.5 w-12 text-center">
+                  <input
+                    type="checkbox"
+                    aria-label="Select All"
+                    checked={selectedTeamIds.size > 0 && selectedTeamIds.size === filteredTeams.length}
+                    onChange={handleToggleSelectAll}
+                    className="w-4 h-4 rounded border-[#D1D5DB] text-[#164A36] focus:ring-[#164A36] cursor-pointer"
+                  />
+                </th>
                 <th className="px-5 py-3.5">Team ID (Username)</th>
                 <th className="px-5 py-3.5">Registration No. (Password)</th>
                 <th className="px-5 py-3.5">Team Name</th>
@@ -512,13 +592,13 @@ export const AdminCredentialsPage: React.FC = () => {
             <tbody className="divide-y divide-[#E5E7EB] text-[#111827]">
               {isLoading ? (
                 <tr>
-                  <td colSpan={7} className="px-5 py-12 text-center text-[#667085]">
+                  <td colSpan={8} className="px-5 py-12 text-center text-[#667085]">
                     Loading team credentials...
                   </td>
                 </tr>
               ) : filteredTeams.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-5 py-12 text-center text-[#667085]">
+                  <td colSpan={8} className="px-5 py-12 text-center text-[#667085]">
                     {searchQuery
                       ? 'No credentials match your search query.'
                       : 'No credentials imported yet. Click "Import Credentials" above to upload an Excel or CSV file with TEAM ID and REGISTRATION NUMBER.'}
@@ -529,9 +609,26 @@ export const AdminCredentialsPage: React.FC = () => {
                   const pass = t.teamLeadRegistrationNumber || t.teamId;
                   const isRevealed = showAllPasswords || revealedTeamIds.has(t.teamId);
                   const isLinked = t.teamName && !t.teamName.startsWith('Team TM-') && !t.teamName.startsWith('Team ALPHA-') && t.teamMembers?.length > 0;
+                  const isSelected = selectedTeamIds.has(t.teamId);
 
                   return (
-                    <tr key={t.teamId} className="hover:bg-[#F7F5EF]/50 transition-colors">
+                    <tr
+                      key={t.teamId}
+                      className={`hover:bg-[#F7F5EF]/50 transition-colors ${
+                        isSelected ? 'bg-[#EEF5F0]/60' : ''
+                      }`}
+                    >
+                      {/* Row Selection Checkbox */}
+                      <td className="px-4 py-4 w-12 text-center">
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${t.teamId}`}
+                          checked={isSelected}
+                          onChange={() => handleToggleRow(t.teamId)}
+                          className="w-4 h-4 rounded border-[#D1D5DB] text-[#164A36] focus:ring-[#164A36] cursor-pointer"
+                        />
+                      </td>
+
                       {/* Team ID (Username) */}
                       <td className="px-5 py-4">
                         <div className="flex items-center gap-2">
@@ -1025,6 +1122,17 @@ export const AdminCredentialsPage: React.FC = () => {
         isDangerous
         onCancel={() => setTeamToDelete(null)}
         onConfirm={handleDeleteConfirm}
+      />
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={isBulkDeleteModalOpen}
+        title={`Delete ${selectedTeamIds.size} Selected Credentials?`}
+        message={`Are you sure you want to permanently delete all ${selectedTeamIds.size} selected credentials? These teams will no longer be able to log in. This action cannot be undone.`}
+        confirmText={isDeletingBulk ? 'Deleting...' : `Delete ${selectedTeamIds.size} Credentials`}
+        isDangerous
+        onCancel={() => setIsBulkDeleteModalOpen(false)}
+        onConfirm={handleBulkDeleteConfirm}
       />
     </AdminLayout>
   );

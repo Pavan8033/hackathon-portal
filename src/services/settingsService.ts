@@ -19,30 +19,42 @@ export const DEFAULT_SETTINGS: PortalSettings = {
 };
 
 export class SettingsService {
+  private static memorySettings: PortalSettings | null = null;
+
   /**
-   * Get current portal settings
+   * Get current portal settings with resilient multi-tier persistence
    */
   public static async getSettings(): Promise<PortalSettings> {
+    const local = this.getLocalSettings();
+
     if (isFirebaseConfigured && db) {
       try {
         const docRef = doc(db, 'settings', 'portalConfig');
         const snap = await getDoc(docRef);
         if (snap.exists()) {
           const remote = snap.data() as PortalSettings;
-          this.saveLocalSettings(remote);
-          return remote;
+          const merged: PortalSettings = {
+            ...DEFAULT_SETTINGS,
+            ...local,
+            ...remote,
+          };
+          this.saveLocalSettings(merged);
+          return merged;
         } else {
-          // Initialize default in Firestore
-          await setDoc(docRef, DEFAULT_SETTINGS);
-          this.saveLocalSettings(DEFAULT_SETTINGS);
-          return DEFAULT_SETTINGS;
+          // If Firestore document doesn't exist yet, try to seed it with current local settings (NOT defaults)
+          try {
+            await setDoc(docRef, local);
+          } catch {
+            // ignore if permissions prevent seeding
+          }
+          return local;
         }
       } catch (err) {
         console.warn('[SettingsService] Firestore get error, using local:', err);
       }
     }
 
-    return this.getLocalSettings();
+    return local;
   }
 
   /**
@@ -52,7 +64,7 @@ export class SettingsService {
     updates: Partial<PortalSettings>,
     adminId: string = 'admin'
   ): Promise<PortalSettings> {
-    const current = await this.getSettings();
+    const current = this.getLocalSettings();
     const updated: PortalSettings = {
       ...current,
       ...updates,
@@ -60,15 +72,17 @@ export class SettingsService {
       updatedBy: adminId,
     };
 
+    // Save to local storage and memory cache immediately
+    this.saveLocalSettings(updated);
+
     if (isFirebaseConfigured && db) {
       try {
         await setDoc(doc(db, 'settings', 'portalConfig'), updated);
       } catch (err) {
-        console.warn('[SettingsService] Firestore save error:', err);
+        console.warn('[SettingsService] Firestore save error (local settings preserved):', err);
       }
     }
 
-    this.saveLocalSettings(updated);
     return updated;
   }
 
@@ -158,24 +172,31 @@ export class SettingsService {
   // Local storage helpers
   // -------------------------------------------------------------
   private static getLocalSettings(): PortalSettings {
+    if (this.memorySettings) {
+      return this.memorySettings;
+    }
     try {
       const stored = localStorage.getItem(SETTINGS_STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
-        return {
+        const resolved = {
           ...DEFAULT_SETTINGS,
           ...parsed,
           problemSelectionLimit: Number(parsed.problemSelectionLimit) || DEFAULT_SETTINGS.problemSelectionLimit,
         };
+        this.memorySettings = resolved;
+        return resolved;
       }
     } catch {
       // ignore
     }
+    this.memorySettings = DEFAULT_SETTINGS;
     this.saveLocalSettings(DEFAULT_SETTINGS);
     return DEFAULT_SETTINGS;
   }
 
   private static saveLocalSettings(settings: PortalSettings): void {
+    this.memorySettings = settings;
     try {
       localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
     } catch {

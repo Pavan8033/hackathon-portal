@@ -30,6 +30,7 @@ import { Navbar } from '../../components/layout/Navbar';
 import { Footer } from '../../components/layout/Footer';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
+import { CountdownTimer } from '../../components/common/CountdownTimer';
 import { useAuth } from '../../context/AuthContext';
 import { useEvent } from '../../context/EventContext';
 import { ProblemService } from '../../services/problemService';
@@ -91,16 +92,8 @@ export const ProblemDetailPage: React.FC = () => {
 
         setSettings(portalSettings);
 
-        if (!availability.found) {
+        if (!availability.found || !availability.problem) {
           setErrorStatus('NOT_FOUND');
-          setProblem(null);
-          setIsLoading(false);
-          return;
-        }
-
-        if (!availability.isPublished || !availability.problem) {
-          // Exists but not published - hide contents per Section 30
-          setErrorStatus('UNAVAILABLE');
           setProblem(null);
           setIsLoading(false);
           return;
@@ -174,6 +167,12 @@ export const ProblemDetailPage: React.FC = () => {
   const problemSelectionLimit = eventConfig.problemSelectionLimit || settings?.problemSelectionLimit || 2;
   const currentSelectedCount = problem?.selectedCount || 0;
   const isCapacityReached = Boolean(problem && currentSelectedCount >= problemSelectionLimit && !isThisProblemSelected);
+
+  // Scheduled countdown lock
+  const scheduleLock = useMemo(() => {
+    return ProblemService.isProblemLockedBySchedule(problem);
+  }, [problem]);
+  const isScheduledAndLocked = scheduleLock.isLocked;
 
   // Handle Selection Confirmation (Sections 5 & 6 & 7)
   const handleConfirmSelection = async () => {
@@ -334,6 +333,43 @@ export const ProblemDetailPage: React.FC = () => {
             </span>
           </nav>
         </div>
+
+        {/* Scheduled Challenge Notice & Countdown Banner */}
+        {isScheduledAndLocked && (
+          <div className="mb-6 p-5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-950 flex flex-col md:flex-row md:items-center justify-between gap-5 shadow-xs animate-in fade-in duration-300">
+            <div className="flex items-start gap-3.5">
+              <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0 mt-0.5">
+                <Clock className="w-5 h-5 text-amber-700" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-amber-200 text-amber-900 border border-amber-300">
+                    PREVIEW MODE
+                  </span>
+                  <h3 className="text-sm font-extrabold text-amber-950 tracking-wide uppercase">
+                    SCHEDULED CHALLENGE • SELECTION WILL UNLOCK SOON
+                  </h3>
+                </div>
+                <p className="text-xs text-amber-800 leading-relaxed max-w-2xl">
+                  You are viewing the complete official problem statement, evaluation criteria, and requirements. Selection locks automatically until the release countdown concludes.
+                </p>
+              </div>
+            </div>
+
+            {scheduleLock.releaseAt && (
+              <div className="shrink-0 w-full md:w-auto">
+                <CountdownTimer
+                  targetDate={scheduleLock.releaseAt}
+                  label="CHALLENGE UNLOCKS IN"
+                  className="bg-white/90 border-amber-200 shadow-none"
+                  onExpire={() => {
+                    setProblem((prev) => (prev ? { ...prev, status: 'PUBLISHED' } : null));
+                  }}
+                />
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Section 15: Header Editorial Banner */}
         <div className="bg-white rounded-2xl border border-[#E5E7EB] p-6 sm:p-10 shadow-xs mb-8">
@@ -844,6 +880,29 @@ export const ProblemDetailPage: React.FC = () => {
                       <Lock className="w-4 h-4 text-amber-600" />
                       <span>CAPACITY REACHED ({problemSelectionLimit}/{problemSelectionLimit} TEAMS)</span>
                     </button>
+                  ) : isScheduledAndLocked ? (
+                    /* CASE: Problem is SCHEDULED with active countdown */
+                    <div className="flex flex-col gap-3 w-full sm:w-auto">
+                      {scheduleLock.releaseAt && (
+                        <div className="w-full">
+                          <CountdownTimer
+                            targetDate={scheduleLock.releaseAt}
+                            label="SELECTION OPENS IN"
+                            onExpire={() => {
+                              setProblem((prev) => (prev ? { ...prev, status: 'PUBLISHED' } : null));
+                            }}
+                          />
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        disabled
+                        className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-amber-50 border border-amber-300 text-xs sm:text-sm font-bold text-amber-900 cursor-not-allowed shadow-2xs"
+                      >
+                        <Clock className="w-4 h-4 text-amber-700 animate-spin" />
+                        <span>SELECTION LOCKED (UNLOCKS AFTER COUNTDOWN)</span>
+                      </button>
+                    </div>
                   ) : !isSelectionOpen ? (
                     /* CASE 4: Selection closed */
                     <button

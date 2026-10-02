@@ -18,6 +18,7 @@ import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
 import { CountdownTimer } from '../../components/common/CountdownTimer';
 import { useAuth } from '../../context/AuthContext';
+import { useEvent } from '../../context/EventContext';
 import { TeamService } from '../../services/teamService';
 import { ProblemService } from '../../services/problemService';
 import { SelectionService } from '../../services/selectionService';
@@ -28,6 +29,7 @@ import type { ProblemRecord, TeamSelection, PortalSettings, AnnouncementRecord, 
 
 export const ParticipantDashboardPage: React.FC = () => {
   const { team } = useAuth();
+  const { eventConfig } = useEvent();
   const [teamDetails, setTeamDetails] = useState<TeamRecord | null>(team || null);
   const [publishedProblems, setPublishedProblems] = useState<ProblemRecord[]>([]);
   const [announcements, setAnnouncements] = useState<AnnouncementRecord[]>([]);
@@ -86,12 +88,30 @@ export const ParticipantDashboardPage: React.FC = () => {
   const isLive = totalPublished > 0;
 
   const currentTeam = teamDetails || team;
-  const teamName = currentTeam?.teamName || 'Team';
-  const teamId = currentTeam?.teamId || '';
-  const teamLead = currentTeam?.teamLeadName || 'Team Lead';
-  const regNo = currentTeam?.teamLeadRegistrationNumber || '';
-  const memberList = currentTeam?.teamMembers || [];
-  const memberCount = memberList.length > 0 ? memberList.length : 1;
+  const rawTeamName = currentTeam?.teamName?.trim() || '';
+  const teamId = currentTeam?.teamId?.trim() || '';
+  // Avoid stutter like "Team Team ALPHA-004"
+  const teamName = rawTeamName || (teamId ? `Team ${teamId}` : 'Team');
+
+  const rawLead = currentTeam?.teamLeadName?.trim() || '';
+  const isLeadPlaceholder =
+    !rawLead ||
+    rawLead.toLowerCase() === 'team lead' ||
+    rawLead.toLowerCase() === rawTeamName.toLowerCase();
+  const teamLead = isLeadPlaceholder ? 'Leader (Pending Roster)' : rawLead;
+
+  // Filter out placeholder names like "Team Lead" from member list
+  const memberList = (currentTeam?.teamMembers || []).filter(
+    (m) => m && m.trim().toLowerCase() !== 'team lead' && m.trim() !== ''
+  );
+  const displayMembers =
+    memberList.length > 0 ? memberList : !isLeadPlaceholder ? [teamLead] : [];
+  const memberCount = displayMembers.length > 0 ? displayMembers.length : 1;
+
+  const rawCollege = currentTeam?.college?.trim() || '';
+  const isCollegePlaceholder =
+    !rawCollege || rawCollege.toLowerCase() === 'participant institution';
+  const college = isCollegePlaceholder ? '' : rawCollege;
 
   const hasSelection = Boolean(selection || currentTeam?.selectedProblemId);
   const selectedProblemId = selection?.problemId || currentTeam?.selectedProblemId || '';
@@ -112,6 +132,117 @@ export const ParticipantDashboardPage: React.FC = () => {
           <span>/</span>
           <span className="text-[#111827] font-semibold">Team Overview</span>
         </div>
+
+        {/* 1. EVENT BANNER (Configured in Settings, placed prominently for participants) */}
+        {eventConfig.eventBanner ? (
+          <div className="mb-8 rounded-3xl overflow-hidden border border-[#E5E7EB] bg-white shadow-xs relative">
+            <div className="h-48 sm:h-64 w-full relative">
+              <img
+                src={eventConfig.eventBanner}
+                alt={eventConfig.eventName}
+                className="w-full h-full object-cover"
+                onError={(e) => {
+                  (e.target as HTMLElement).style.display = 'none';
+                }}
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/35 to-transparent flex items-end p-6 sm:p-10">
+                <div className="text-white space-y-1.5">
+                  <div className="flex items-center gap-2.5">
+                    {eventConfig.clubLogo && (
+                      <img
+                        src={eventConfig.clubLogo}
+                        alt="Club Logo"
+                        className="w-9 h-9 rounded-xl bg-white/95 p-1 object-contain shadow-xs"
+                      />
+                    )}
+                    <span className="text-xs font-bold uppercase tracking-wider text-white/95 bg-white/20 backdrop-blur-xs px-3 py-1 rounded-full border border-white/25">
+                      {eventConfig.clubName}
+                    </span>
+                  </div>
+                  <h2 className="text-2xl sm:text-4xl font-extrabold tracking-tight drop-shadow-sm">
+                    {eventConfig.eventName}
+                  </h2>
+                  {eventConfig.tagline && (
+                    <p className="text-xs sm:text-sm text-white/85 max-w-2xl drop-shadow-xs">
+                      {eventConfig.tagline}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="mb-8 p-5 sm:p-6 rounded-2xl bg-gradient-to-r from-[#164A36] to-[#0E3324] text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xs">
+            <div className="flex items-center gap-3.5">
+              {eventConfig.clubLogo ? (
+                <img
+                  src={eventConfig.clubLogo}
+                  alt="Club"
+                  className="w-11 h-11 object-contain rounded-xl bg-white p-1.5 border border-white/20 shrink-0"
+                />
+              ) : (
+                <div className="w-11 h-11 rounded-xl bg-white/10 flex items-center justify-center font-bold text-lg border border-white/20 shrink-0">
+                  ⚡
+                </div>
+              )}
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-200 block">
+                  {eventConfig.clubName} Presents
+                </span>
+                <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight">
+                  {eventConfig.eventName}
+                </h2>
+              </div>
+            </div>
+            <span className="text-xs font-bold uppercase px-3 py-1.5 rounded-full bg-white/15 backdrop-blur-xs border border-white/20 text-white">
+              Official Hackathon Portal
+            </span>
+          </div>
+        )}
+
+        {/* 2. SCHEDULED RELEASE COUNTDOWN (Visible and ticking when release is pending) */}
+        {scheduledReleaseTime && new Date(scheduledReleaseTime).getTime() > Date.now() && (
+          <div className="mb-8 p-5 sm:p-6 rounded-2xl bg-amber-50 border border-amber-200 text-amber-950 flex flex-col md:flex-row md:items-center justify-between gap-5 shadow-xs">
+            <div className="flex items-start gap-3.5">
+              <div className="w-11 h-11 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
+                <Clock className="w-6 h-6 text-amber-700" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-amber-200 text-amber-900 border border-amber-300">
+                    RELEASE SCHEDULED
+                  </span>
+                  <h3 className="text-base font-extrabold text-amber-950 tracking-wide">
+                    PROBLEM STATEMENTS SCHEDULED FOR RELEASE
+                  </h3>
+                </div>
+                <p className="text-xs text-amber-800 leading-relaxed max-w-xl">
+                  Challenge problem statements are currently in preview mode. You can browse and review all details now. Problem selection unlocks automatically when the countdown completes.
+                </p>
+                <div className="pt-2">
+                  <Link
+                    to="/participant/problems"
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-900 bg-amber-200/80 hover:bg-amber-200 px-3.5 py-1.5 rounded-lg border border-amber-300 transition-colors"
+                  >
+                    <span>Browse Challenges Ahead of Unlock</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </Link>
+                </div>
+              </div>
+            </div>
+
+            <div className="shrink-0 w-full md:w-auto">
+              <CountdownTimer
+                targetDate={scheduledReleaseTime}
+                label="CHALLENGES UNLOCK IN"
+                className="bg-white/90 border-amber-200 shadow-none"
+                onExpire={() => {
+                  loadDashboardData();
+                }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Section 4: Header Welcome Area */}
         <div className="pb-8 border-b border-[#E5E7EB]">
@@ -160,7 +291,7 @@ export const ParticipantDashboardPage: React.FC = () => {
           )}
         </div>
 
-        {/* Section 4: TEAM STATUS Area */}
+        {/* Section 4: TEAM STATUS Area (Without Registration Numbers) */}
         <div className="mb-8 bg-white rounded-2xl border border-[#E5E7EB] p-6 sm:p-8 shadow-xs">
           <div className="flex items-center justify-between pb-5 border-b border-[#F3F4F6]">
             <div>
@@ -176,11 +307,11 @@ export const ParticipantDashboardPage: React.FC = () => {
             </Badge>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3.5 mt-6">
-            {/* Team */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 mt-6">
+            {/* Team Name */}
             <div className="p-3.5 rounded-xl bg-[#F7F5EF]/70 border border-[#E5E7EB]">
               <span className="text-[11px] font-bold text-[#667085] uppercase tracking-wider block">
-                Team
+                Team Name
               </span>
               <span className="text-sm sm:text-base font-bold text-[#111827] mt-1 block truncate">
                 {teamName}
@@ -207,23 +338,13 @@ export const ParticipantDashboardPage: React.FC = () => {
               </span>
             </div>
 
-            {/* Registration Number */}
-            <div className="p-3.5 rounded-xl bg-[#F7F5EF]/70 border border-[#E5E7EB]">
-              <span className="text-[11px] font-bold text-[#667085] uppercase tracking-wider block">
-                Reg. Number
-              </span>
-              <span className="font-mono text-sm sm:text-base font-semibold text-[#164A36] mt-1 block truncate">
-                {regNo || '—'}
-              </span>
-            </div>
-
             {/* Members */}
             <div className="p-3.5 rounded-xl bg-[#F7F5EF]/70 border border-[#E5E7EB]">
               <span className="text-[11px] font-bold text-[#667085] uppercase tracking-wider block">
                 Members
               </span>
               <span className="text-sm sm:text-base font-bold text-[#111827] mt-1 block">
-                {memberCount} Members
+                {memberCount} Member{memberCount > 1 ? 's' : ''}
               </span>
             </div>
 
@@ -247,21 +368,23 @@ export const ParticipantDashboardPage: React.FC = () => {
           </div>
 
           {/* Enrolled Team Members Roster */}
-          {memberList.length > 0 && (
-            <div className="mt-5 pt-4 border-t border-[#F3F4F6]">
-              <div className="flex items-center justify-between mb-2.5">
-                <span className="text-[11px] font-bold text-[#667085] uppercase tracking-wider">
-                  Enrolled Team Members ({memberList.length})
+          <div className="mt-5 pt-4 border-t border-[#F3F4F6]">
+            <div className="flex items-center justify-between mb-2.5">
+              <span className="text-[11px] font-bold text-[#667085] uppercase tracking-wider">
+                Enrolled Team Members ({displayMembers.length})
+              </span>
+              {college && (
+                <span className="text-xs text-[#667085] font-medium hidden sm:inline">
+                  {college}
                 </span>
-                {currentTeam?.college && (
-                  <span className="text-xs text-[#667085] font-medium hidden sm:inline">
-                    {currentTeam.college}
-                  </span>
-                )}
-              </div>
+              )}
+            </div>
+            {displayMembers.length > 0 ? (
               <div className="flex flex-wrap gap-2">
-                {memberList.map((m, idx) => {
-                  const isLead = m.trim().toLowerCase() === teamLead.trim().toLowerCase();
+                {displayMembers.map((m, idx) => {
+                  const isLead =
+                    !isLeadPlaceholder &&
+                    m.trim().toLowerCase() === teamLead.trim().toLowerCase();
                   return (
                     <span
                       key={idx}
@@ -281,8 +404,12 @@ export const ParticipantDashboardPage: React.FC = () => {
                   );
                 })}
               </div>
-            </div>
-          )}
+            ) : (
+              <p className="text-xs text-[#667085] italic">
+                Official team member roster will appear here once participants are imported by organizers.
+              </p>
+            )}
+          </div>
         </div>
 
         {/* Sections 2 & 3: PROBLEM SELECTION CARD (No Selection vs Selected) */}
