@@ -26,7 +26,7 @@ export const TeamProfilePage: React.FC = () => {
       if (team?.teamId) {
         const full = await TeamService.getTeamById(team.teamId);
         // Compare login username with imported participant roster team id
-        if (full && full.teamId.trim().toLowerCase() === team.teamId.trim().toLowerCase()) {
+        if (full && TeamService.normalizeId(full.teamId) === TeamService.normalizeId(team.teamId)) {
           setTeamDetails(full);
         }
       }
@@ -37,7 +37,8 @@ export const TeamProfilePage: React.FC = () => {
   const currentTeam = teamDetails || team;
   const rawTeamName = currentTeam?.teamName?.trim() || '';
   const teamId = currentTeam?.teamId?.trim() || '';
-  const teamName = rawTeamName || (teamId ? `Team ${teamId}` : 'Team');
+  const isGeneric = TeamService.isGenericTeamName(rawTeamName, teamId);
+  const teamName = isGeneric ? (teamId ? `Team ${teamId}` : 'Team') : rawTeamName;
 
   const rawLead = currentTeam?.teamLeadName?.trim() || '';
   const isLeadPlaceholder =
@@ -45,13 +46,14 @@ export const TeamProfilePage: React.FC = () => {
     rawLead.toLowerCase() === 'team lead' ||
     rawLead.toLowerCase() === 'leader' ||
     rawLead.toLowerCase() === 'team lead name' ||
-    rawLead.toLowerCase() === rawTeamName.toLowerCase();
-  const teamLead = isLeadPlaceholder ? 'Leader (Pending Roster)' : rawLead;
+    rawLead.toLowerCase() === rawTeamName.toLowerCase() ||
+    rawLead.toLowerCase() === teamId.toLowerCase();
+  const teamLead = isLeadPlaceholder ? '—' : rawLead;
 
   const rawCollege = currentTeam?.college?.trim() || '';
   const isCollegePlaceholder =
     !rawCollege || rawCollege.toLowerCase() === 'participant institution';
-  const college = isCollegePlaceholder ? 'Enrolled Hackathon Team' : rawCollege;
+  const college = isCollegePlaceholder ? '' : rawCollege;
 
   // Filter out column titles and placeholder strings from member roster
   const cleanMembers = (currentTeam?.teamMembers || []).filter(
@@ -64,7 +66,7 @@ export const TeamProfilePage: React.FC = () => {
       m.trim() !== ''
   );
   const displayMembers =
-    cleanMembers.length > 0 ? cleanMembers : !isLeadPlaceholder ? [teamLead] : [];
+    cleanMembers.length > 0 ? cleanMembers : teamLead && teamLead !== '—' ? [teamLead] : [];
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F7F5EF]">
@@ -133,7 +135,7 @@ export const TeamProfilePage: React.FC = () => {
                 Team ID
               </span>
               <span className="font-mono text-base font-bold text-[#164A36] mt-1 block">
-                {teamId || 'ALPHA-001'}
+                {teamId || '—'}
               </span>
             </div>
 
@@ -153,7 +155,7 @@ export const TeamProfilePage: React.FC = () => {
                 Institution
               </span>
               <span className="text-sm font-semibold text-[#111827] mt-1 block truncate">
-                {college}
+                {college || '—'}
               </span>
             </div>
 

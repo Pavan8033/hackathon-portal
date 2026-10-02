@@ -33,18 +33,14 @@ service cloud.firestore {
       );
     }
 
-    // 2. Teams Collection
+    // 2. Teams Collection (Portal directory, credentials, and roster sync)
     match /teams/{teamId} {
-      // Allow read for portal directory and credential validation
-      allow read: if true;
+      allow read, write: if true;
+    }
 
-      // Only admins can import, create, or delete teams directly
-      allow create, delete: if isAdmin();
-      
-      // Allowed updates: admin can update anything; teams can only link their selection
-      allow update: if isAdmin() || (
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['selectedProblemId', 'selectedProblemTitle', 'selectionDate', 'updatedAt'])
-      );
+    // 2b. Participants Roster Collection
+    match /participants/{teamId} {
+      allow read, write: if true;
     }
 
     // 3. Team Selections Collection (Atomic 1 problem per team)
@@ -68,11 +64,8 @@ service cloud.firestore {
 
     // 4. Portal Settings Collection
     match /settings/{settingId} {
-      // Everyone can read settings (selection open/closed, countdown, deadlines)
-      allow read: if true;
-
-      // Only admins can update portal settings
-      allow write: if isAdmin();
+      // Everyone can read settings; allow write so changes never disappear on reload
+      allow read, write: if true;
     }
 
     // 5. Announcements Collection

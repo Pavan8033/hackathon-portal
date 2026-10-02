@@ -2,7 +2,6 @@ import {
   collection,
   doc,
   getDocs,
-  getDoc,
   setDoc,
   updateDoc,
   deleteDoc,
@@ -12,6 +11,7 @@ import { hashCredential } from '../utils/crypto';
 import type { TeamRecord, ParsedTeamRow, TeamStatus } from '../types';
 
 const TEAMS_STORAGE_KEY = 'hackathon_portal_teams_v2';
+const PARTICIPANTS_STORAGE_KEY = 'hackathon_portal_participants_roster_v2';
 
 export class TeamService {
   /**
@@ -20,14 +20,49 @@ export class TeamService {
    */
   public static normalizeId(id?: string | null): string {
     if (!id) return '';
-    return id.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const clean = id.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const match = clean.match(/^([a-z]+)0*(\d+)$/);
+    if (match) {
+      return `${match[1]}${match[2]}`;
+    }
+    return clean;
+  }
+
+  /**
+   * Identifies whether a team name is just an auto-generated shell (e.g. "Team ALPHA-004")
+   * vs a real custom team name from participant roster.
+   */
+  public static isGenericTeamName(name?: string, teamId?: string): boolean {
+    if (!name) return true;
+    const trimmed = name.trim();
+    const lower = trimmed.toLowerCase();
+    if (
+      lower === 'team name' ||
+      lower === 'team' ||
+      lower === 'teamlead' ||
+      lower === 'team lead' ||
+      lower === 'members' ||
+      lower === 'participant institution'
+    ) {
+      return true;
+    }
+    if (/^team\s+tm-\d+-\d+$/i.test(trimmed)) return true;
+    if (/^team\s+team/i.test(trimmed)) return true;
+    if (teamId) {
+      const cleanId = this.normalizeId(teamId);
+      const cleanName = this.normalizeId(trimmed);
+      if (cleanName === `team${cleanId}` || cleanName === cleanId) return true;
+    }
+    return false;
   }
 
   /**
    * Initialize and retrieve all teams
    */
   public static async getAllTeams(): Promise<TeamRecord[]> {
-    let list: TeamRecord[] = [];
+    const list: TeamRecord[] = [];
+
+    // 1. Fetch from Firestore teams and participants collections
     if (isFirebaseConfigured && db) {
       try {
         const teamsRef = collection(db, 'teams');
@@ -35,51 +70,104 @@ export class TeamService {
         if (!snapshot.empty) {
           snapshot.forEach((d) => list.push(d.data() as TeamRecord));
         }
+
+        // Also fetch from participants collection
+        try {
+          const partRef = collection(db, 'participants');
+          const partSnap = await getDocs(partRef);
+          if (!partSnap.empty) {
+            partSnap.forEach((d) => list.push(d.data() as TeamRecord));
+          }
+        } catch {
+          // ignore participants fetch error
+        }
       } catch (err) {
         console.warn('[TeamService] Firestore fetch error, using local fallback:', err);
       }
     }
 
-    if (list.length === 0) {
-      list = this.getLocalTeams();
-    } else {
-      // Merge with any local additions
-      const local = this.getLocalTeams();
-      for (const loc of local) {
-        const cleanLocId = this.normalizeId(loc.teamId);
-        if (!list.some((r) => this.normalizeId(r.teamId) === cleanLocId)) {
-          list.push(loc);
-        }
-      }
-    }
+    // 2. Merge with local storage teams and participants
+    const local = this.getLocalTeams();
+    const localParticipants = this.getLocalParticipants();
+    list.push(...local, ...localParticipants);
 
-    // Deduplicate and merge any multiple records for the same team ID
+    // 3. Deduplicate and merge any multiple records for the same team ID
     const mergedMap = new Map<string, TeamRecord>();
     for (const t of list) {
       const nid = this.normalizeId(t.teamId);
       if (!nid) continue;
+
       if (!mergedMap.has(nid)) {
         mergedMap.set(nid, t);
       } else {
         const prev = mergedMap.get(nid)!;
-        // Merge records, favoring real participant details over placeholder data
-        const prevCleanLead = prev.teamLeadName && prev.teamLeadName.toLowerCase() !== 'team lead';
-        const currCleanLead = t.teamLeadName && t.teamLeadName.toLowerCase() !== 'team lead';
-        const currHasRoster = (t.teamMembers?.length || 0) > 0 && currCleanLead;
+
+        // Clean member lists
+        const prevCleanMems = (prev.teamMembers || []).filter(
+          (m) => m && m.toLowerCase() !== 'team lead' && m.toLowerCase() !== 'participant institution' && m.toLowerCase() !== 'members'
+        );
+        const currCleanMems = (t.teamMembers || []).filter(
+          (m) => m && m.toLowerCase() !== 'team lead' && m.toLowerCase() !== 'participant institution' && m.toLowerCase() !== 'members'
+        );
+
+        // Clean lead names
+        const cleanLead = (name?: string) => {
+          if (!name) return '';
+          const l = name.trim().toLowerCase();
+          if (l === 'team lead' || l === 'leader' || l === 'team lead name' || l === 'lead' || l === 'captain') return '';
+          return name.trim();
+        };
+
+        const prevLead = cleanLead(prev.teamLeadName);
+        const currLead = cleanLead(t.teamLeadName);
+        const bestLead = currLead || prevLead;
+
+        const bestMembers =
+          currCleanMems.length >= prevCleanMems.length && currCleanMems.length > 0
+            ? currCleanMems
+            : prevCleanMems.length > 0
+            ? prevCleanMems
+            : bestLead
+            ? [bestLead]
+            : [];
+
+        // Clean team name: ALWAYS prefer real custom name over generic "Team <id>"
+        const tGeneric = this.isGenericTeamName(t.teamName, t.teamId || prev.teamId);
+        const prevGeneric = this.isGenericTeamName(prev.teamName, prev.teamId || t.teamId);
+
+        let bestTeamName = '';
+        if (!tGeneric && t.teamName) {
+          bestTeamName = t.teamName.trim();
+        } else if (!prevGeneric && prev.teamName) {
+          bestTeamName = prev.teamName.trim();
+        } else {
+          bestTeamName = (t.teamName || prev.teamName || `Team ${t.teamId || prev.teamId}`).trim();
+        }
+
+        const cleanCollege = (c?: string) => {
+          if (!c) return '';
+          const cl = c.trim().toLowerCase();
+          if (cl === 'participant institution' || cl === 'institution' || cl === 'college') return '';
+          return c.trim();
+        };
+        const bestCollege = cleanCollege(t.college) || cleanCollege(prev.college) || '';
 
         const merged: TeamRecord = {
-          ...(currHasRoster ? prev : t),
-          ...(currHasRoster ? t : prev),
           teamId: t.teamId || prev.teamId,
-          teamName:
-            t.teamName && !t.teamName.startsWith('Team TM-') && !t.teamName.startsWith('Team ALPHA-') && t.teamName.toLowerCase() !== 'team name'
-              ? t.teamName
-              : prev.teamName,
-          teamLeadName: currCleanLead ? t.teamLeadName : prevCleanLead ? prev.teamLeadName : t.teamLeadName || prev.teamLeadName,
-          teamLeadRegistrationNumber: t.teamLeadRegistrationNumber || prev.teamLeadRegistrationNumber,
-          credentialHash: t.credentialHash || prev.credentialHash,
+          teamName: bestTeamName,
+          teamLeadName: bestLead,
+          teamLeadRegistrationNumber: t.teamLeadRegistrationNumber || prev.teamLeadRegistrationNumber || '',
+          credentialHash: t.credentialHash || prev.credentialHash || '',
+          teamMembers: bestMembers,
+          college: bestCollege,
+          email: t.email || prev.email || '',
+          phone: t.phone || prev.phone || '',
           selectedProblemId: t.selectedProblemId || prev.selectedProblemId,
           selectedProblemTitle: t.selectedProblemTitle || prev.selectedProblemTitle,
+          selectionDate: t.selectionDate || prev.selectionDate,
+          status: 'active',
+          createdAt: prev.createdAt || t.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
         };
         mergedMap.set(nid, merged);
       }
@@ -97,51 +185,11 @@ export class TeamService {
     const cleanId = this.normalizeId(teamId);
     if (!cleanId) return null;
 
-    if (isFirebaseConfigured && db) {
-      try {
-        const teamDoc = await getDoc(doc(db, 'teams', teamId));
-        if (teamDoc.exists()) {
-          const remote = teamDoc.data() as TeamRecord;
-          const hasRoster =
-            remote.teamMembers &&
-            remote.teamMembers.length > 0 &&
-            remote.teamLeadName &&
-            remote.teamLeadName.toLowerCase() !== 'team lead';
-          if (hasRoster) return remote;
-        }
-      } catch (err) {
-        console.warn('[TeamService] Firestore getDoc error:', err);
-      }
-    }
-
     const all = await this.getAllTeams();
-    const matches = all.filter(
+    const match = all.find(
       (t) => this.normalizeId(t.teamId) === cleanId || this.normalizeId(t.teamName) === cleanId
     );
-    if (matches.length === 0) return null;
-
-    // Pick best enriched record with actual participant roster details
-    return matches.reduce((best, curr) => {
-      const score = (r: TeamRecord) => {
-        let s = 0;
-        const cleanMems = (r.teamMembers || []).filter(
-          (m) => m && m.toLowerCase() !== 'team lead' && m.toLowerCase() !== 'participant institution'
-        );
-        s += cleanMems.length * 3;
-        if (r.teamLeadName && r.teamLeadName.toLowerCase() !== 'team lead' && r.teamLeadName.trim() !== '') s += 5;
-        if (
-          r.teamName &&
-          !r.teamName.startsWith('Team TM-') &&
-          !r.teamName.startsWith('Team ALPHA-') &&
-          r.teamName.toLowerCase() !== 'team name'
-        ) {
-          s += 4;
-        }
-        if (r.college && r.college.toLowerCase() !== 'participant institution') s += 1;
-        return s;
-      };
-      return score(curr) > score(best) ? curr : best;
-    });
+    return match || null;
   }
 
   /**
@@ -252,8 +300,14 @@ export class TeamService {
         (r.teamLeadName?.toLowerCase() === 'team lead' && r.teamName?.toLowerCase() === 'team name');
       if (isHeaderRow) continue;
 
-      // Check if team already exists by normalized teamId -> MERGE with all participant details!
-      const existingIndex = existing.findIndex((t) => this.normalizeId(t.teamId) === customId);
+      // Check if team already exists by normalized teamId or teamName -> MERGE with all participant details!
+      const normalizedName = this.normalizeId(r.teamName);
+      const existingIndex = existing.findIndex(
+        (t) =>
+          this.normalizeId(t.teamId) === customId ||
+          (normalizedName && this.normalizeId(t.teamName) === normalizedName)
+      );
+
       if (existingIndex >= 0) {
         const prev = existing[existingIndex];
         const secretPassword = (
@@ -266,21 +320,24 @@ export class TeamService {
 
         // Extract real team name, real lead name, real members
         const realTeamName =
-          r.teamName && r.teamName.toLowerCase() !== 'team name' && !r.teamName.toLowerCase().startsWith('team team ')
+          !this.isGenericTeamName(r.teamName, r.teamId)
             ? r.teamName.trim()
-            : prev.teamName && !prev.teamName.toLowerCase().startsWith('team team ')
-            ? prev.teamName
-            : `Team ${r.teamId}`;
+            : !this.isGenericTeamName(prev.teamName, prev.teamId)
+            ? prev.teamName.trim()
+            : (r.teamName || prev.teamName || `Team ${r.teamId}`).trim();
 
         const realLead =
-          r.teamLeadName && r.teamLeadName.toLowerCase() !== 'team lead' && r.teamLeadName.toLowerCase() !== 'leader'
+          r.teamLeadName &&
+          r.teamLeadName.toLowerCase() !== 'team lead' &&
+          r.teamLeadName.toLowerCase() !== 'leader' &&
+          r.teamLeadName.toLowerCase() !== 'team lead name'
             ? r.teamLeadName.trim()
             : prev.teamLeadName && prev.teamLeadName.toLowerCase() !== 'team lead'
             ? prev.teamLeadName
             : r.members?.[0] || '';
 
         const cleanMembers = (r.members && r.members.length > 0 ? r.members : prev.teamMembers || [])
-          .filter((m) => m && m.toLowerCase() !== 'team lead' && m.toLowerCase() !== 'participant institution');
+          .filter((m) => m && m.toLowerCase() !== 'team lead' && m.toLowerCase() !== 'participant institution' && m.toLowerCase() !== 'members');
 
         const updated: TeamRecord = {
           ...prev,
@@ -296,7 +353,9 @@ export class TeamService {
           college:
             r.college?.trim() && r.college.toLowerCase() !== 'participant institution'
               ? r.college.trim()
-              : prev.college,
+              : prev.college && prev.college.toLowerCase() !== 'participant institution'
+              ? prev.college.trim()
+              : '',
           status: 'active',
           updatedAt: timestamp,
         };
@@ -306,19 +365,13 @@ export class TeamService {
         if (isFirebaseConfigured && db) {
           try {
             await setDoc(doc(db, 'teams', updated.teamId), updated);
+            await setDoc(doc(db, 'participants', customId), updated);
           } catch (err) {
             console.warn('[TeamService] Firestore merge error:', err);
           }
         }
 
         updatedCount++;
-        continue;
-      }
-
-      // Check duplicate team name among existing teams
-      const normalizedName = this.normalizeId(r.teamName);
-      if (normalizedName && existing.some((t) => this.normalizeId(t.teamName) === normalizedName)) {
-        errors.push(`Team "${r.teamName.trim()}" already exists in the directory.`);
         continue;
       }
 
@@ -334,17 +387,20 @@ export class TeamService {
       const credentialHash = await hashCredential(secretPassword);
 
       const realTeamName =
-        r.teamName && r.teamName.toLowerCase() !== 'team name'
+        !this.isGenericTeamName(r.teamName, assignedId)
           ? r.teamName.trim()
-          : `Team ${assignedId}`;
+          : (r.teamName || `Team ${assignedId}`).trim();
 
       const realLead =
-        r.teamLeadName && r.teamLeadName.toLowerCase() !== 'team lead' && r.teamLeadName.toLowerCase() !== 'leader'
+        r.teamLeadName &&
+        r.teamLeadName.toLowerCase() !== 'team lead' &&
+        r.teamLeadName.toLowerCase() !== 'leader' &&
+        r.teamLeadName.toLowerCase() !== 'team lead name'
           ? r.teamLeadName.trim()
           : r.members?.[0] || '';
 
       const cleanMembers = (r.members || []).filter(
-        (m) => m && m.toLowerCase() !== 'team lead' && m.toLowerCase() !== 'participant institution'
+        (m) => m && m.toLowerCase() !== 'team lead' && m.toLowerCase() !== 'participant institution' && m.toLowerCase() !== 'members'
       );
 
       const record: TeamRecord = {
@@ -356,7 +412,7 @@ export class TeamService {
         teamMembers: cleanMembers.length > 0 ? cleanMembers : realLead ? [realLead] : [],
         email: r.email?.trim() || '',
         phone: r.phone?.trim() || '',
-        college: r.college?.trim() || 'Participant Institution',
+        college: r.college?.trim() && r.college.toLowerCase() !== 'participant institution' ? r.college.trim() : '',
         status: 'active',
         createdAt: timestamp,
         updatedAt: timestamp,
@@ -368,14 +424,16 @@ export class TeamService {
       if (isFirebaseConfigured && db) {
         try {
           await setDoc(doc(db, 'teams', record.teamId), record);
+          await setDoc(doc(db, 'participants', customId), record);
         } catch (err) {
           console.warn('[TeamService] Firestore save error:', err);
         }
       }
     }
 
-    // Update local cache
+    // Update local cache for both teams and participants
     this.saveLocalTeams(existing);
+    this.saveLocalParticipants(existing);
 
     return {
       importedCount: newRecords.length,
@@ -639,6 +697,37 @@ export class TeamService {
       // LocalStorage access error fallback
     }
     return this.inMemoryTeams;
+  }
+
+  private static inMemoryParticipants: TeamRecord[] = [];
+
+  public static getLocalParticipants(): TeamRecord[] {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const stored = localStorage.getItem(PARTICIPANTS_STORAGE_KEY);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            this.inMemoryParticipants = parsed;
+            return parsed;
+          }
+        }
+      }
+    } catch {
+      // LocalStorage access error fallback
+    }
+    return this.inMemoryParticipants;
+  }
+
+  public static saveLocalParticipants(participants: TeamRecord[]): void {
+    this.inMemoryParticipants = participants;
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(PARTICIPANTS_STORAGE_KEY, JSON.stringify(participants));
+      }
+    } catch {
+      // ignore
+    }
   }
 
   private static saveLocalTeams(teams: TeamRecord[]): void {

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowRight,
+  ArrowLeft,
   Search,
   X,
   FileCheck,
@@ -10,8 +11,13 @@ import {
   Filter,
   ArrowUpDown,
   BookOpen,
-  Compass,
-  Clock,
+  CheckCircle2,
+  Lock,
+  Download,
+  ShieldCheck,
+  Layers,
+  Sparkles,
+  Tag,
 } from 'lucide-react';
 import { Navbar } from '../../components/layout/Navbar';
 import { Footer } from '../../components/layout/Footer';
@@ -19,14 +25,24 @@ import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { ProblemService } from '../../services/problemService';
-import { useEvent } from '../../context/EventContext';
-import { getDocumentTypeInfo } from '../../utils/formatters';
-import type { ProblemRecord } from '../../types';
+import { SelectionService } from '../../services/selectionService';
+import { useAuth } from '../../context/AuthContext';
+import {
+  getDocumentTypeInfo,
+  formatSelectionDateTime,
+  formatFileSize,
+} from '../../utils/formatters';
+import type { ProblemRecord, TeamSelection } from '../../types';
 
 export const ProblemStatementsPage: React.FC = () => {
-  const { eventConfig } = useEvent();
+  const { team } = useAuth();
+
   const [problems, setProblems] = useState<ProblemRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Selection state for isolation enforcement
+  const [teamSelection, setTeamSelection] = useState<TeamSelection | null>(null);
+  const [selectedProblemDetail, setSelectedProblemDetail] = useState<ProblemRecord | null>(null);
 
   // Search & Filter States
   const [searchQuery, setSearchQuery] = useState('');
@@ -36,17 +52,37 @@ export const ProblemStatementsPage: React.FC = () => {
   const [sortBy, setSortBy] = useState<'id' | 'title-asc' | 'title-desc' | 'newest' | 'oldest'>('id');
 
   useEffect(() => {
-    const loadPublishedProblems = async () => {
+    const loadData = async () => {
       setIsLoading(true);
-      // Strictly participant published challenges only per Section 1 & 25
-      const data = await ProblemService.getAllProblems({ forParticipant: true });
-      setProblems(data);
-      setIsLoading(false);
+      try {
+        if (team?.teamId) {
+          const sel = await SelectionService.getSelectionForTeam(team.teamId);
+          setTeamSelection(sel);
+          const selProblemId = sel?.problemId || team?.selectedProblemId;
+          if (selProblemId) {
+            const pDetail = await ProblemService.getProblemById(selProblemId, { forParticipant: true });
+            setSelectedProblemDetail(pDetail);
+          }
+        }
+        const data = await ProblemService.getAllProblems({ forParticipant: true });
+        setProblems(data);
+      } catch (err) {
+        console.error('[ProblemStatementsPage] Error loading data:', err);
+      } finally {
+        setIsLoading(false);
+      }
     };
-    loadPublishedProblems();
-  }, []);
+    loadData();
+  }, [team?.teamId, team?.selectedProblemId]);
 
-  // Section 14: Data-driven metadata calculation
+  const hasSelection = Boolean(teamSelection || team?.selectedProblemId);
+  const selectedProblemId = teamSelection?.problemId || team?.selectedProblemId || '';
+  const committedProblem =
+    selectedProblemDetail ||
+    problems.find((p) => p.problemId === selectedProblemId) ||
+    null;
+
+  // Metadata calculations
   const totalCount = problems.length;
   const uniqueDomains = useMemo(() => {
     return Array.from(new Set(problems.map((p) => p.category)));
@@ -55,65 +91,60 @@ export const ProblemStatementsPage: React.FC = () => {
     return problems.filter((p) => Boolean(p.fileName || p.fileUrl)).length;
   }, [problems]);
 
-  // Section 9: Data-driven categories
+  // Categories list
   const categories = useMemo(() => {
     return ['All', ...uniqueDomains];
   }, [uniqueDomains]);
 
-  // Section 13: Featured Problem (first published problem or prioritized)
-  const featuredProblem = useMemo(() => {
-    return problems.length > 0 ? problems[0] : null;
-  }, [problems]);
-
-  // Filtering & Sorting Logic
+  // Filtering & Sorting Logic for unselected teams
   const filteredProblems = useMemo(() => {
-    return problems.filter((prob) => {
-      // 1. Category Filter
-      if (selectedCategory !== 'All' && prob.category !== selectedCategory) {
-        return false;
-      }
-
-      // 2. Difficulty Filter
-      if (selectedDifficulty !== 'All') {
-        const probDiff = prob.difficulty.toLowerCase();
-        const selDiff = selectedDifficulty.toLowerCase();
-        if (selDiff === 'easy' && !probDiff.includes('begin') && !probDiff.includes('easy')) return false;
-        if (selDiff === 'medium' && !probDiff.includes('inter') && !probDiff.includes('medium')) return false;
-        if (selDiff === 'hard' && !probDiff.includes('adv') && !probDiff.includes('hard')) return false;
-      }
-
-      // 3. File Type Filter
-      if (selectedFileType !== 'All') {
-        const docInfo = getDocumentTypeInfo(prob.fileName, prob.fileType);
-        if (docInfo.type.toLowerCase() !== selectedFileType.toLowerCase()) {
+    return problems
+      .filter((prob) => {
+        // 1. Category Filter
+        if (selectedCategory !== 'All' && prob.category !== selectedCategory) {
           return false;
         }
-      }
 
-      // 4. Search Filter (Section 8: Problem ID, Title, Description, Category, Tags)
-      if (searchQuery.trim()) {
-        const q = searchQuery.trim().toLowerCase();
-        const matchId = prob.problemId.toLowerCase().includes(q);
-        const matchTitle = prob.title.toLowerCase().includes(q);
-        const matchDesc = prob.description.toLowerCase().includes(q);
-        const matchCategory = prob.category.toLowerCase().includes(q);
-        const matchTags = prob.tags?.some((t) => t.toLowerCase().includes(q));
-
-        if (!matchId && !matchTitle && !matchDesc && !matchCategory && !matchTags) {
-          return false;
+        // 2. Difficulty Filter
+        if (selectedDifficulty !== 'All') {
+          const probDiff = prob.difficulty.toLowerCase();
+          const selDiff = selectedDifficulty.toLowerCase();
+          if (selDiff === 'easy' && !probDiff.includes('begin') && !probDiff.includes('easy')) return false;
+          if (selDiff === 'medium' && !probDiff.includes('inter') && !probDiff.includes('medium')) return false;
+          if (selDiff === 'hard' && !probDiff.includes('adv') && !probDiff.includes('hard')) return false;
         }
-      }
 
-      return true;
-    }).sort((a, b) => {
-      // Section 10: Sorting
-      if (sortBy === 'title-asc') return a.title.localeCompare(b.title);
-      if (sortBy === 'title-desc') return b.title.localeCompare(a.title);
-      if (sortBy === 'newest') return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      if (sortBy === 'oldest') return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-      // Default: Problem ID
-      return a.problemId.localeCompare(b.problemId, undefined, { numeric: true });
-    });
+        // 3. File Type Filter
+        if (selectedFileType !== 'All') {
+          const docInfo = getDocumentTypeInfo(prob.fileName, prob.fileType);
+          if (docInfo.type.toLowerCase() !== selectedFileType.toLowerCase()) {
+            return false;
+          }
+        }
+
+        // 4. Search Filter
+        if (searchQuery.trim()) {
+          const q = searchQuery.trim().toLowerCase();
+          const matchId = prob.problemId.toLowerCase().includes(q);
+          const matchTitle = prob.title.toLowerCase().includes(q);
+          const matchDesc = prob.description.toLowerCase().includes(q);
+          const matchCategory = prob.category.toLowerCase().includes(q);
+          const matchTags = prob.tags?.some((t) => t.toLowerCase().includes(q));
+
+          if (!matchId && !matchTitle && !matchDesc && !matchCategory && !matchTags) {
+            return false;
+          }
+        }
+
+        return true;
+      })
+      .sort((a, b) => {
+        if (sortBy === 'title-asc') return a.title.localeCompare(b.title);
+        if (sortBy === 'title-desc') return b.title.localeCompare(a.title);
+        if (sortBy === 'newest') return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        if (sortBy === 'oldest') return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        return a.problemId.localeCompare(b.problemId, undefined, { numeric: true });
+      });
   }, [problems, selectedCategory, selectedDifficulty, selectedFileType, searchQuery, sortBy]);
 
   const clearAllFilters = () => {
@@ -131,14 +162,10 @@ export const ProblemStatementsPage: React.FC = () => {
     selectedFileType !== 'All' ||
     sortBy !== 'id';
 
-  // Helper for document availability label and badge
+  // Helper for document availability badge
   const renderDocBadge = (prob: ProblemRecord) => {
     if (!prob.fileName && !prob.fileUrl) {
-      return (
-        <span className="text-xs text-[#9CA3AF]">
-          Online Brief
-        </span>
-      );
+      return <span className="text-xs text-[#9CA3AF]">Online Brief</span>;
     }
     const docInfo = getDocumentTypeInfo(prob.fileName, prob.fileType);
     let Icon = FileCheck;
@@ -153,6 +180,237 @@ export const ProblemStatementsPage: React.FC = () => {
     );
   };
 
+  // =========================================================================
+  // VIEW A: TEAM HAS COMMITTED TO A PROBLEM STATEMENT
+  // Show full description, deliverables, scoring criteria, and HIDE ALL OTHER PROBLEMS.
+  // =========================================================================
+  if (!isLoading && hasSelection && committedProblem) {
+    const selectedTime = teamSelection?.selectedAt || team?.selectionDate;
+    const formattedSelectionTime = formatSelectionDateTime(selectedTime);
+
+    return (
+      <div className="min-h-screen flex flex-col bg-[#F7F5EF]">
+        <Navbar />
+
+        <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-10">
+          {/* Breadcrumb Navigation */}
+          <div className="mb-6 flex items-center justify-between">
+            <Link
+              to="/participant"
+              className="inline-flex items-center gap-2 text-sm font-bold text-[#164A36] hover:text-[#0E3324] transition-colors"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Back to Dashboard</span>
+            </Link>
+
+            <div className="flex items-center gap-2 text-xs text-[#667085]">
+              <Link to="/participant" className="hover:text-[#164A36]">Dashboard</Link>
+              <span>/</span>
+              <span className="font-semibold text-[#111827]">Committed Challenge</span>
+            </div>
+          </div>
+
+          {/* Selection Status Banner */}
+          <div className="mb-8 p-6 sm:p-7 rounded-2xl bg-gradient-to-r from-[#164A36] to-[#0E3324] text-white shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-5">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center shrink-0 text-emerald-300">
+                <CheckCircle2 className="w-7 h-7" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2.5">
+                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-400/20 text-emerald-300 border border-emerald-400/30 text-[11px] font-mono font-bold uppercase tracking-wider">
+                    SELECTION CONFIRMED
+                  </span>
+                  <span className="text-xs text-white/70">
+                    Allocated to Team {team?.teamName || team?.teamId}
+                  </span>
+                </div>
+                <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight">
+                  Your Team's Committed Challenge
+                </h1>
+                <p className="text-xs sm:text-sm text-white/80 max-w-xl leading-relaxed">
+                  Your team has officially selected this problem statement. As per hackathon rules, you are exclusively committed to this challenge. All other problem statements are concealed.
+                </p>
+              </div>
+            </div>
+
+            <div className="shrink-0 flex md:flex-col items-start md:items-end justify-between border-t md:border-t-0 pt-3 md:pt-0 border-white/15 text-xs text-white/75">
+              <span>Confirmed On</span>
+              <span className="font-semibold text-white mt-0.5 font-mono">{formattedSelectionTime.combined}</span>
+            </div>
+          </div>
+
+          {/* Full Problem Statement Specification Card */}
+          <div className="bg-white rounded-3xl border border-[#D5E6DB] p-6 sm:p-10 shadow-xs mb-8 space-y-8">
+            {/* Header: ID, Title, Category, Difficulty */}
+            <div className="border-b border-[#F3F4F6] pb-6 space-y-3">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <span className="px-3 py-1 rounded-lg bg-[#EEF5F0] text-[#164A36] font-mono font-extrabold text-sm border border-[#D5E6DB]">
+                  {committedProblem.problemId}
+                </span>
+                <Badge variant="subtle" size="md">
+                  {committedProblem.category}
+                </Badge>
+                <span className="text-xs font-semibold px-2.5 py-1 rounded bg-gray-100 text-gray-700">
+                  Difficulty: {committedProblem.difficulty}
+                </span>
+                {renderDocBadge(committedProblem)}
+              </div>
+
+              <h2 className="text-2xl sm:text-3xl font-extrabold text-[#111827] tracking-tight leading-snug">
+                {committedProblem.title}
+              </h2>
+            </div>
+
+            {/* 1. Full Description */}
+            <div className="space-y-3">
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#164A36] flex items-center gap-2">
+                <BookOpen className="w-4 h-4" />
+                Problem Statement Description
+              </h3>
+              <div className="text-sm sm:text-base text-[#374151] leading-relaxed whitespace-pre-line bg-[#F7F5EF]/50 p-6 rounded-2xl border border-[#E5E7EB]/80">
+                {committedProblem.description}
+              </div>
+            </div>
+
+            {/* 2. Expected Solution / Deliverables (if present) */}
+            {committedProblem.expectedSolution && (
+              <div className="space-y-3 pt-2">
+                <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#164A36] flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4" />
+                  Expected Solution & Deliverables
+                </h3>
+                <div className="text-sm text-[#374151] leading-relaxed whitespace-pre-line bg-white p-6 rounded-2xl border border-[#E5E7EB]">
+                  {committedProblem.expectedSolution}
+                </div>
+              </div>
+            )}
+
+            {/* 3. Evaluation Criteria & Scoring Rubric (if present) */}
+            {committedProblem.evaluationCriteria && (
+              <div className="space-y-3 pt-2">
+                <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#164A36] flex items-center gap-2">
+                  <Sparkles className="w-4 h-4" />
+                  Evaluation Criteria & Scoring Rubric
+                </h3>
+                <div className="text-sm text-[#374151] leading-relaxed whitespace-pre-line bg-white p-6 rounded-2xl border border-[#E5E7EB]">
+                  {committedProblem.evaluationCriteria}
+                </div>
+              </div>
+            )}
+
+            {/* 4. Suggested Technologies & Frameworks (if present) */}
+            {committedProblem.technologies && committedProblem.technologies.length > 0 && (
+              <div className="space-y-3 pt-2">
+                <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#164A36] flex items-center gap-2">
+                  <Layers className="w-4 h-4" />
+                  Suggested Technologies & Tools
+                </h3>
+                <div className="flex flex-wrap gap-2">
+                  {committedProblem.technologies.map((tech, idx) => (
+                    <span
+                      key={idx}
+                      className="px-3 py-1.5 rounded-xl bg-[#F7F5EF] text-xs font-bold text-[#164A36] border border-[#E5E7EB]"
+                    >
+                      {tech}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 5. Constraints & Submission Rules (if present) */}
+            {committedProblem.constraints && (
+              <div className="space-y-3 pt-2">
+                <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#164A36] flex items-center gap-2">
+                  <Lock className="w-4 h-4" />
+                  Constraints & Requirements
+                </h3>
+                <div className="text-sm text-[#374151] leading-relaxed whitespace-pre-line bg-amber-50/60 p-5 rounded-2xl border border-amber-200/80">
+                  {committedProblem.constraints}
+                </div>
+              </div>
+            )}
+
+            {/* 6. Tags */}
+            {committedProblem.tags && committedProblem.tags.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 pt-2">
+                <Tag className="w-3.5 h-3.5 text-[#667085] mr-1" />
+                {committedProblem.tags.map((tag, idx) => (
+                  <span
+                    key={idx}
+                    className="text-[11px] font-medium text-[#667085] bg-gray-100 px-2.5 py-0.5 rounded-full"
+                  >
+                    #{tag}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* 7. Attached Documents / Download Brief */}
+            {(committedProblem.fileName || committedProblem.fileUrl) && (
+              <div className="p-5 rounded-2xl bg-[#EEF5F0] border border-[#D5E6DB] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-white text-[#164A36] border border-[#D5E6DB] flex items-center justify-center shrink-0">
+                    <FileText className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-[#111827]">
+                      {committedProblem.fileName || `${committedProblem.problemId}_Specification`}
+                    </h4>
+                    <span className="text-[11px] text-[#667085]">
+                      Official Challenge Document {committedProblem.fileSize ? `• ${formatFileSize(committedProblem.fileSize)}` : ''}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2.5 shrink-0">
+                  {committedProblem.fileUrl && (
+                    <a
+                      href={committedProblem.fileUrl}
+                      download={committedProblem.fileName}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#164A36] text-white text-xs font-bold hover:bg-[#0E3324] shadow-2xs transition-colors"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>Download Document</span>
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Navigation Actions */}
+            <div className="pt-6 border-t border-[#F3F4F6] flex flex-col sm:flex-row items-center justify-between gap-4">
+              <Link
+                to="/participant"
+                className="text-xs font-bold text-[#667085] hover:text-[#111827] flex items-center gap-1.5 transition-colors"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span>Return to Team Dashboard</span>
+              </Link>
+
+              <Button
+                to={`/participant/problem/${committedProblem.problemId}`}
+                variant="primary"
+                size="md"
+                rightIcon={<ArrowRight className="w-4 h-4 ml-1" />}
+                className="shadow-xs font-bold"
+              >
+                OPEN INTERACTIVE CHALLENGE VIEW
+              </Button>
+            </div>
+          </div>
+        </main>
+
+        <Footer />
+      </div>
+    );
+  }
+
+  // =========================================================================
+  // VIEW B: TEAM HAS NOT COMMITTED YET
+  // Show standard challenge catalog WITHOUT any separate "Featured Challenge" banner.
+  // =========================================================================
   return (
     <div className="min-h-screen flex flex-col bg-[#F7F5EF]">
       <Navbar />
@@ -165,7 +423,7 @@ export const ProblemStatementsPage: React.FC = () => {
           <span className="text-[#111827] font-semibold">Problem Statements</span>
         </div>
 
-        {/* Header Section per Section 7 & 14 */}
+        {/* Header Section */}
         <div className="pb-8 border-b border-[#E5E7EB] flex flex-col md:flex-row md:items-end justify-between gap-6">
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#EEF5F0] border border-[#D5E6DB] text-xs font-mono font-bold text-[#164A36] uppercase mb-3">
@@ -180,7 +438,7 @@ export const ProblemStatementsPage: React.FC = () => {
             </p>
           </div>
 
-          {/* Useful Dynamic Metadata per Section 14 */}
+          {/* Dynamic Metadata */}
           <div className="flex flex-wrap items-center gap-3 shrink-0">
             <div className="px-4 py-2.5 rounded-xl bg-white border border-[#E5E7EB] shadow-2xs text-center min-w-[100px]">
               <span className="text-[10px] font-bold text-[#667085] uppercase tracking-wider block">
@@ -211,61 +469,10 @@ export const ProblemStatementsPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Section 13: Featured Problem Highlight Banner */}
-        {!isLoading && featuredProblem && !hasActiveFilters && (
-          <div className="my-8 bg-white rounded-2xl border border-[#D5E6DB] p-6 sm:p-8 shadow-xs relative overflow-hidden group">
-            <div className="absolute right-0 top-0 bottom-0 opacity-5 pointer-events-none">
-              <Compass className="w-80 h-80 -mr-16 -mt-10 text-[#164A36]" />
-            </div>
-
-            <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-              {/* Left Side */}
-              <div className="max-w-3xl space-y-3">
-                <div className="flex items-center gap-2.5">
-                  <span className="px-2.5 py-1 rounded bg-[#EEF5F0] text-[#164A36] font-mono text-xs font-bold border border-[#D5E6DB]">
-                    Featured Challenge • {featuredProblem.problemId}
-                  </span>
-                  <Badge variant="subtle" size="sm">
-                    {featuredProblem.category}
-                  </Badge>
-                </div>
-
-                <h2 className="text-xl sm:text-2xl font-extrabold text-[#111827] tracking-tight group-hover:text-[#164A36] transition-colors">
-                  {featuredProblem.title}
-                </h2>
-
-                <p className="text-sm text-[#4B5563] leading-relaxed line-clamp-2">
-                  {featuredProblem.description}
-                </p>
-              </div>
-
-              {/* Right Side */}
-              <div className="flex flex-col sm:flex-row lg:flex-col items-start lg:items-end justify-between gap-4 shrink-0 border-t lg:border-t-0 pt-4 lg:pt-0 border-[#F3F4F6]">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold px-2.5 py-1 rounded bg-gray-100 text-gray-700">
-                    Difficulty: {featuredProblem.difficulty}
-                  </span>
-                  {renderDocBadge(featuredProblem)}
-                </div>
-
-                <Button
-                  to={`/participant/problem/${featuredProblem.problemId}`}
-                  variant="primary"
-                  size="md"
-                  rightIcon={<ArrowRight className="w-4 h-4 ml-1 group-hover:translate-x-1 transition-transform" />}
-                  className="shadow-xs"
-                >
-                  EXPLORE PROBLEM →
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Search & Filter Toolbar (Sections 8, 9, 10) */}
+        {/* Search & Filter Toolbar */}
         <div className="my-8 bg-white rounded-2xl border border-[#E5E7EB] p-5 shadow-xs space-y-4">
           <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
-            {/* Search Input per Section 8 */}
+            {/* Search Input */}
             <div className="relative flex-1">
               <Search className="w-4 h-4 text-[#667085] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
@@ -290,7 +497,7 @@ export const ProblemStatementsPage: React.FC = () => {
 
             {/* Quick Filter Selectors (Difficulty, File Type, Sort) */}
             <div className="flex flex-wrap items-center gap-3">
-              {/* Difficulty Dropdown per Section 9 */}
+              {/* Difficulty Dropdown */}
               <div className="flex items-center gap-1.5 text-xs text-[#667085]">
                 <Filter className="w-3.5 h-3.5 text-[#667085] hidden sm:inline" />
                 <select
@@ -306,7 +513,7 @@ export const ProblemStatementsPage: React.FC = () => {
                 </select>
               </div>
 
-              {/* File Type Dropdown per Section 9 */}
+              {/* File Type Dropdown */}
               <div>
                 <select
                   value={selectedFileType}
@@ -321,7 +528,7 @@ export const ProblemStatementsPage: React.FC = () => {
                 </select>
               </div>
 
-              {/* Sort Dropdown per Section 10 */}
+              {/* Sort Dropdown */}
               <div className="flex items-center gap-1.5">
                 <ArrowUpDown className="w-3.5 h-3.5 text-[#667085] hidden sm:inline" />
                 <select
@@ -340,7 +547,7 @@ export const ProblemStatementsPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Category Tabs per Section 9 */}
+          {/* Category Tabs */}
           <div className="pt-3 border-t border-[#F3F4F6] flex items-center justify-between gap-4">
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none max-w-full">
               {categories.map((cat) => {
@@ -385,7 +592,7 @@ export const ProblemStatementsPage: React.FC = () => {
           )}
         </div>
 
-        {/* Loading State Skeleton per Section 31 */}
+        {/* Loading State Skeleton */}
         {isLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {[1, 2, 3, 4, 5, 6].map((i) => (
@@ -410,14 +617,12 @@ export const ProblemStatementsPage: React.FC = () => {
             ))}
           </div>
         ) : problems.length === 0 ? (
-          /* Empty State per Phase 3 */
           <EmptyState
             icon={<BookOpen className="w-8 h-8 text-[#164A36]" />}
             title="No problem statements have been released yet."
             description="Official challenges will appear here once released by the organizers."
           />
         ) : filteredProblems.length === 0 ? (
-          /* Empty State per Section 32: Filter/Search no results */
           <div className="bg-white rounded-2xl border border-[#E5E7EB] p-12 text-center shadow-xs">
             <div className="w-12 h-12 rounded-xl bg-[#F7F5EF] text-[#164A36] flex items-center justify-center mx-auto mb-4">
               <Search className="w-6 h-6" />
@@ -442,90 +647,51 @@ export const ProblemStatementsPage: React.FC = () => {
             </div>
           </div>
         ) : (
-          /* Problem Cards Grid per Section 11 & 12 (Desktop 3-col, Tablet 2-col, Mobile 1-col) */
+          /* Problem Cards Grid */
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredProblems.map((prob) => {
               const difficultyVariants: Record<string, string> = {
                 Beginner: 'bg-emerald-50 text-emerald-800 border-emerald-200',
                 Intermediate: 'bg-blue-50 text-blue-800 border-blue-200',
-                Advanced: 'bg-purple-50 text-purple-800 border-purple-200',
+                Advanced: 'bg-rose-50 text-rose-800 border-rose-200',
               };
-
-              const limit = eventConfig.problemSelectionLimit || 2;
-              const selectedCount = prob.selectedCount || 0;
-              const isFull = selectedCount >= limit;
-              const remainingSlots = Math.max(0, limit - selectedCount);
-              const isScheduled =
-                prob.status === 'SCHEDULED' &&
-                (!prob.releaseAt || new Date(prob.releaseAt).getTime() > Date.now());
+              const diffBadgeClass = difficultyVariants[prob.difficulty] || 'bg-gray-100 text-gray-800 border-gray-200';
 
               return (
                 <div
                   key={prob.problemId}
-                  className="bg-white rounded-2xl border border-[#E5E7EB] hover:border-[#CBD5E1] p-6 shadow-xs hover:shadow-md transition-all duration-200 flex flex-col justify-between group"
+                  className="bg-white rounded-2xl border border-[#E5E7EB] p-6 shadow-xs hover:shadow-md hover:border-[#164A36]/40 transition-all flex flex-col justify-between group"
                 >
-                  <div className="space-y-3">
-                    {/* Header: Problem ID & Category Badge per Section 11 */}
+                  <div className="space-y-3.5">
+                    {/* Top Meta: ID + Category */}
                     <div className="flex items-center justify-between gap-2">
-                      <span className="font-mono text-xs font-bold text-[#164A36] bg-[#EEF5F0] px-2.5 py-1 rounded-md border border-[#D5E6DB]">
+                      <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-[#EEF5F0] text-[#164A36] border border-[#D5E6DB]">
                         {prob.problemId}
                       </span>
-                      <div className="flex items-center gap-1.5">
-                        {isScheduled && (
-                          <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300">
-                            SCHEDULED
-                          </span>
-                        )}
-                        <span
-                          className={`text-[11px] font-semibold px-2 py-0.5 rounded border ${
-                            difficultyVariants[prob.difficulty] || 'bg-gray-50 text-gray-700 border-gray-200'
-                          }`}
-                        >
-                          {prob.difficulty}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Domain Category & Capacity Slot Status */}
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[11px] font-bold text-[#667085] uppercase tracking-wider block">
+                      <Badge variant="subtle" size="sm">
                         {prob.category}
-                      </span>
-                      {isScheduled ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200 shrink-0">
-                          <Clock className="w-3 h-3 text-amber-600" />
-                          Preview Mode
-                        </span>
-                      ) : isFull ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200 shrink-0">
-                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                          Capacity Full ({limit}/{limit})
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#EEF5F0] text-[#164A36] border border-[#D5E6DB] shrink-0">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                          {remainingSlots} of {limit} slots left
-                        </span>
-                      )}
+                      </Badge>
                     </div>
 
-                    {/* Problem Title per Section 11 */}
-                    <h3 className="text-base sm:text-lg font-bold text-[#111827] tracking-tight leading-snug group-hover:text-[#164A36] transition-colors line-clamp-2">
-                      {prob.title}
+                    {/* Title */}
+                    <h3 className="text-base font-extrabold text-[#111827] group-hover:text-[#164A36] transition-colors line-clamp-2 leading-snug">
+                      <Link to={`/participant/problem/${prob.problemId}`}>
+                        {prob.title}
+                      </Link>
                     </h3>
 
-                    {/* Short Description with line-clamping per Section 12 */}
-                    <p className="text-xs sm:text-sm text-[#4B5563] leading-relaxed line-clamp-3">
+                    {/* Description preview */}
+                    <p className="text-xs text-[#4B5563] line-clamp-3 leading-relaxed">
                       {prob.description}
                     </p>
 
-                    {/* Tags */}
+                    {/* Tags preview */}
                     {prob.tags && prob.tags.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 pt-1">
+                      <div className="flex flex-wrap gap-1 pt-1">
                         {prob.tags.slice(0, 3).map((tag, idx) => (
                           <span
                             key={idx}
-                            className="text-[10px] font-medium text-[#667085] bg-[#F7F5EF] px-2 py-0.5 rounded border border-[#E5E7EB]"
+                            className="text-[10px] text-[#667085] bg-gray-50 px-2 py-0.5 rounded border border-gray-100"
                           >
                             #{tag}
                           </span>
@@ -534,22 +700,21 @@ export const ProblemStatementsPage: React.FC = () => {
                     )}
                   </div>
 
-                  {/* Card Bottom: Document availability + Action Button per Section 11 */}
-                  <div className="mt-6 pt-4 border-t border-[#F3F4F6] flex items-center justify-between gap-3">
-                    <div>
+                  {/* Card Footer */}
+                  <div className="pt-4 mt-4 border-t border-[#F3F4F6] flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${diffBadgeClass}`}>
+                        {prob.difficulty}
+                      </span>
                       {renderDocBadge(prob)}
                     </div>
 
                     <Link
                       to={`/participant/problem/${prob.problemId}`}
-                      className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold shadow-2xs transition-colors shrink-0 ${
-                        isScheduled
-                          ? 'bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200'
-                          : 'bg-[#164A36] text-white hover:bg-[#0E3324]'
-                      }`}
+                      className="inline-flex items-center gap-1 text-xs font-bold text-[#164A36] hover:text-[#0E3324] group-hover:translate-x-0.5 transition-all"
                     >
-                      <span>{isScheduled ? 'PREVIEW CHALLENGE' : 'VIEW DETAILS'}</span>
-                      <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+                      <span>VIEW BRIEF</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
                     </Link>
                   </div>
                 </div>

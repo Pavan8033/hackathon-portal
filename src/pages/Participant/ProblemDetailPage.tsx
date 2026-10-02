@@ -54,7 +54,8 @@ export const ProblemDetailPage: React.FC = () => {
   const [teamSelection, setTeamSelection] = useState<TeamSelection | null>(null);
   const [settings, setSettings] = useState<PortalSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [errorStatus, setErrorStatus] = useState<'NOT_FOUND' | 'UNAVAILABLE' | null>(null);
+  const [errorStatus, setErrorStatus] = useState<'NOT_FOUND' | 'UNAVAILABLE' | 'COMMITTED_TO_OTHER' | null>(null);
+  const [committedProblemId, setCommittedProblemId] = useState<string>('');
 
   // Active Tab state (Section 16)
   const [activeTab, setActiveTab] = useState<'overview' | 'requirements' | 'evaluation' | 'resources'>('overview');
@@ -106,6 +107,14 @@ export const ProblemDetailPage: React.FC = () => {
         if (team?.teamId) {
           const currentSel = await SelectionService.getSelectionForTeam(team.teamId);
           setTeamSelection(currentSel);
+          const selId = currentSel?.problemId || team?.selectedProblemId;
+          // Isolation enforcement: If team already committed to a different problem, restrict viewing unselected problems
+          if (selId && currentProblem.problemId && selId.trim().toLowerCase() !== currentProblem.problemId.trim().toLowerCase()) {
+            setCommittedProblemId(selId);
+            setErrorStatus('COMMITTED_TO_OTHER');
+            setIsLoading(false);
+            return;
+          }
         }
 
         // Section 29: Load up to 3 related published problems
@@ -241,6 +250,48 @@ export const ProblemDetailPage: React.FC = () => {
   }
 
   // Section 30: Error States
+  if (errorStatus === 'COMMITTED_TO_OTHER') {
+    return (
+      <div className="min-h-screen flex flex-col bg-[#F7F5EF]">
+        <Navbar />
+        <main className="flex-1 max-w-2xl w-full mx-auto px-4 py-20 text-center flex flex-col items-center justify-center">
+          <div className="w-16 h-16 rounded-full bg-[#EEF5F0] text-[#164A36] border border-[#D5E6DB] flex items-center justify-center mb-5 shadow-xs">
+            <Lock className="w-8 h-8" />
+          </div>
+          <span className="text-[11px] font-extrabold uppercase tracking-wider text-[#164A36] bg-[#EEF5F0] border border-[#D5E6DB] px-3.5 py-1 rounded-full mb-3 inline-block">
+            Access Restricted • Problem Already Selected
+          </span>
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-[#111827] tracking-tight uppercase">
+            CHALLENGE ACCESS RESTRICTED
+          </h1>
+          <p className="mt-3 text-sm sm:text-base text-[#4B5563] max-w-lg leading-relaxed">
+            Your team has already committed to problem statement <strong className="text-[#164A36] font-mono">{committedProblemId}</strong>. As per hackathon regulations, participants can only access their selected problem statement.
+          </p>
+          <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
+            <Button
+              to={`/participant/problem/${committedProblemId}`}
+              variant="primary"
+              size="lg"
+              rightIcon={<ArrowRight className="w-4 h-4 ml-1.5" />}
+              className="font-bold shadow-xs w-full sm:w-auto"
+            >
+              VIEW YOUR COMMITTED CHALLENGE
+            </Button>
+            <Button
+              to="/participant"
+              variant="outline"
+              size="lg"
+              className="font-bold w-full sm:w-auto"
+            >
+              BACK TO DASHBOARD
+            </Button>
+          </div>
+        </main>
+        <Footer />
+      </div>
+    );
+  }
+
   if (errorStatus === 'NOT_FOUND') {
     return (
       <div className="min-h-screen flex flex-col bg-[#F7F5EF]">

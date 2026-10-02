@@ -35,6 +35,7 @@ export const ParticipantDashboardPage: React.FC = () => {
   const [announcements, setAnnouncements] = useState<AnnouncementRecord[]>([]);
   const [scheduledReleaseTime, setScheduledReleaseTime] = useState<string | null>(null);
   const [selection, setSelection] = useState<TeamSelection | null>(null);
+  const [selectedProblemDetail, setSelectedProblemDetail] = useState<ProblemRecord | null>(null);
   const [settings, setSettings] = useState<PortalSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -72,6 +73,12 @@ export const ParticipantDashboardPage: React.FC = () => {
         }
         const currentSel = await SelectionService.getSelectionForTeam(team.teamId);
         setSelection(currentSel);
+
+        const chosenProblemId = currentSel?.problemId || fullTeam?.selectedProblemId || team?.selectedProblemId;
+        if (chosenProblemId) {
+          const pDetail = await ProblemService.getProblemById(chosenProblemId, { forParticipant: true });
+          setSelectedProblemDetail(pDetail);
+        }
       }
     } catch (err) {
       console.error('[ParticipantDashboard] Error loading dashboard:', err);
@@ -90,8 +97,8 @@ export const ParticipantDashboardPage: React.FC = () => {
   const currentTeam = teamDetails || team;
   const rawTeamName = currentTeam?.teamName?.trim() || '';
   const teamId = currentTeam?.teamId?.trim() || '';
-  // Avoid stutter like "Team Team ALPHA-004"
-  const teamName = rawTeamName || (teamId ? `Team ${teamId}` : 'Team');
+  const isGeneric = TeamService.isGenericTeamName(rawTeamName, teamId);
+  const teamName = isGeneric ? (teamId ? `Team ${teamId}` : 'Team') : rawTeamName;
 
   const rawLead = currentTeam?.teamLeadName?.trim() || '';
   const isLeadPlaceholder =
@@ -99,8 +106,9 @@ export const ParticipantDashboardPage: React.FC = () => {
     rawLead.toLowerCase() === 'team lead' ||
     rawLead.toLowerCase() === 'leader' ||
     rawLead.toLowerCase() === 'team lead name' ||
-    rawLead.toLowerCase() === rawTeamName.toLowerCase();
-  const teamLead = isLeadPlaceholder ? 'Leader (Pending Roster)' : rawLead;
+    rawLead.toLowerCase() === rawTeamName.toLowerCase() ||
+    rawLead.toLowerCase() === teamId.toLowerCase();
+  const teamLead = isLeadPlaceholder ? '' : rawLead;
 
   // Filter out placeholder names like "Team Lead" from member list
   const memberList = (currentTeam?.teamMembers || []).filter(
@@ -113,8 +121,8 @@ export const ParticipantDashboardPage: React.FC = () => {
       m.trim() !== ''
   );
   const displayMembers =
-    memberList.length > 0 ? memberList : !isLeadPlaceholder ? [teamLead] : [];
-  const memberCount = displayMembers.length > 0 ? displayMembers.length : 1;
+    memberList.length > 0 ? memberList : teamLead ? [teamLead] : [];
+  const memberCount = displayMembers.length;
 
   const rawCollege = currentTeam?.college?.trim() || '';
   const isCollegePlaceholder =
@@ -123,7 +131,7 @@ export const ParticipantDashboardPage: React.FC = () => {
 
   const hasSelection = Boolean(selection || currentTeam?.selectedProblemId);
   const selectedProblemId = selection?.problemId || currentTeam?.selectedProblemId || '';
-  const selectedProblemTitle = selection?.problemTitle || currentTeam?.selectedProblemTitle || '';
+  const selectedProblemTitle = selection?.problemTitle || currentTeam?.selectedProblemTitle || selectedProblemDetail?.title || '';
   const selectedTimestamp = selection?.selectedAt || currentTeam?.selectionDate || '';
   const formattedTime = formatSelectionDateTime(selectedTimestamp);
 
@@ -342,7 +350,7 @@ export const ParticipantDashboardPage: React.FC = () => {
                 Team Lead
               </span>
               <span className="text-sm sm:text-base font-bold text-[#111827] mt-1 block truncate">
-                {teamLead}
+                {teamLead || '—'}
               </span>
             </div>
 
@@ -352,7 +360,7 @@ export const ParticipantDashboardPage: React.FC = () => {
                 Members
               </span>
               <span className="text-sm sm:text-base font-bold text-[#111827] mt-1 block">
-                {memberCount} Member{memberCount > 1 ? 's' : ''}
+                {memberCount} Member{memberCount === 1 ? '' : 's'}
               </span>
             </div>
 
@@ -391,7 +399,7 @@ export const ParticipantDashboardPage: React.FC = () => {
               <div className="flex flex-wrap gap-2">
                 {displayMembers.map((m, idx) => {
                   const isLead =
-                    !isLeadPlaceholder &&
+                    Boolean(teamLead) &&
                     m.trim().toLowerCase() === teamLead.trim().toLowerCase();
                   return (
                     <span
@@ -434,7 +442,7 @@ export const ParticipantDashboardPage: React.FC = () => {
 
             {hasSelection ? (
               <Badge variant="forest" size="md">
-                LOCKED
+                LOCKED & COMMITTED
               </Badge>
             ) : (
               <Badge variant="subtle" size="md">
@@ -444,30 +452,40 @@ export const ParticipantDashboardPage: React.FC = () => {
           </div>
 
           {hasSelection ? (
-            /* Section 3: TEAM DASHBOARD — SELECTED Prominent Confirmation Card */
+            /* Section 3: TEAM DASHBOARD — SELECTED Prominent Confirmation Card with Full Problem Description */
             <div className="p-6 sm:p-8 rounded-2xl bg-[#EEF5F0] border border-[#D5E6DB] space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-xl bg-white text-[#164A36] border border-[#D5E6DB] flex items-center justify-center shrink-0 shadow-2xs">
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pb-4 border-b border-[#D5E6DB]">
+                <div className="flex items-start gap-3.5">
+                  <div className="w-12 h-12 rounded-xl bg-white text-[#164A36] border border-[#D5E6DB] flex items-center justify-center shrink-0 shadow-2xs mt-1">
                     <CheckCircle2 className="w-6 h-6" />
                   </div>
                   <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs font-bold text-[#164A36] bg-white px-2 py-0.5 rounded border border-[#D5E6DB]">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-xs font-bold text-[#164A36] bg-white px-2.5 py-1 rounded-md border border-[#D5E6DB]">
                         {selectedProblemId}
                       </span>
-                      <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-[#164A36]">
+                      <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-[#164A36] bg-white px-2.5 py-1 rounded-md border border-[#D5E6DB]">
                         <Lock className="w-3 h-3" />
-                        LOCKED
+                        COMMITTED & LOCKED
                       </span>
+                      {selectedProblemDetail?.category && (
+                        <span className="text-xs font-semibold px-2.5 py-1 rounded-md bg-white text-gray-700 border border-[#D5E6DB]">
+                          {selectedProblemDetail.category}
+                        </span>
+                      )}
+                      {selectedProblemDetail?.difficulty && (
+                        <span className="text-xs font-semibold px-2.5 py-1 rounded-md bg-white text-gray-700 border border-[#D5E6DB]">
+                          Difficulty: {selectedProblemDetail.difficulty}
+                        </span>
+                      )}
                     </div>
-                    <h3 className="text-lg sm:text-xl font-bold text-[#111827] mt-1">
-                      {selectedProblemTitle || 'Selected Challenge'}
+                    <h3 className="text-xl sm:text-2xl font-extrabold text-[#111827] mt-2">
+                      {selectedProblemTitle || selectedProblemDetail?.title || 'Selected Challenge'}
                     </h3>
                   </div>
                 </div>
 
-                <div className="shrink-0">
+                <div className="shrink-0 flex items-center gap-2">
                   <Button
                     to="/participant/selected-problem"
                     variant="primary"
@@ -475,13 +493,47 @@ export const ParticipantDashboardPage: React.FC = () => {
                     rightIcon={<ArrowRight className="w-4 h-4 ml-1" />}
                     className="font-bold shadow-xs whitespace-nowrap"
                   >
-                    VIEW SELECTED PROBLEM →
+                    FULL BRIEF & ATTACHMENTS →
                   </Button>
                 </div>
               </div>
 
-              {/* Display details per Section 3 */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-4 border-t border-[#D5E6DB]">
+              {/* Full Problem Description */}
+              <div className="bg-white p-5 sm:p-6 rounded-xl border border-[#D5E6DB] space-y-4">
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-[#667085] mb-1.5">
+                    Problem Statement Description
+                  </h4>
+                  <p className="text-sm text-[#1F2937] leading-relaxed whitespace-pre-line">
+                    {selectedProblemDetail?.description || 'Your team has officially committed to this challenge statement.'}
+                  </p>
+                </div>
+
+                {selectedProblemDetail?.expectedSolution && (
+                  <div className="pt-3 border-t border-[#F3F4F6]">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-[#667085] mb-1">
+                      Expected Deliverables & Outcomes
+                    </h4>
+                    <p className="text-sm text-[#4B5563] leading-relaxed">
+                      {selectedProblemDetail.expectedSolution}
+                    </p>
+                  </div>
+                )}
+
+                {selectedProblemDetail?.evaluationCriteria && (
+                  <div className="pt-3 border-t border-[#F3F4F6]">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-[#667085] mb-1">
+                      Evaluation Criteria
+                    </h4>
+                    <p className="text-sm text-[#4B5563] leading-relaxed">
+                      {selectedProblemDetail.evaluationCriteria}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Display details metadata */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-1">
                 <div className="bg-white/80 p-3.5 rounded-xl border border-[#D5E6DB]">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-[#667085] block">
                     Problem ID
@@ -493,37 +545,37 @@ export const ParticipantDashboardPage: React.FC = () => {
 
                 <div className="bg-white/80 p-3.5 rounded-xl border border-[#D5E6DB]">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-[#667085] block">
-                    Category
+                    Track / Category
                   </span>
                   <span className="font-bold text-sm text-[#111827] mt-0.5 block truncate">
-                    {selection?.category || 'Official Track'}
+                    {selection?.category || selectedProblemDetail?.category || 'Official Track'}
                   </span>
                 </div>
 
                 <div className="bg-white/80 p-3.5 rounded-xl border border-[#D5E6DB]">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-[#667085] block">
-                    Selected Date
+                    Selection Confirmed
                   </span>
                   <span className="font-medium text-sm text-[#111827] mt-0.5 block">
-                    {formattedTime.date}
+                    {formattedTime.date} at {formattedTime.time || '10:00 AM'}
                   </span>
                 </div>
 
                 <div className="bg-white/80 p-3.5 rounded-xl border border-[#D5E6DB]">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-[#667085] block">
-                    Selected Time
+                    Status
                   </span>
-                  <span className="font-medium text-sm text-[#111827] mt-0.5 block">
-                    {formattedTime.time || '10:00 AM'}
+                  <span className="font-bold text-sm text-[#164A36] mt-0.5 block">
+                    Final & Immutable
                   </span>
                 </div>
               </div>
 
-              {/* Message per Section 3 */}
-              <div className="flex items-center gap-2 text-xs text-[#164A36] pt-1">
+              {/* Notice that other problems are hidden */}
+              <div className="flex items-center gap-2 text-xs text-[#164A36] bg-white/70 p-3 rounded-lg border border-[#D5E6DB]">
                 <ShieldCheck className="w-4 h-4 text-[#164A36] shrink-0" />
                 <span>
-                  ✓ Your team has selected its official challenge. Your problem selection is final and cannot be changed.
+                  ✓ Your team has officially committed to this challenge. All other problem statements are hidden per hackathon rules.
                 </span>
               </div>
             </div>
@@ -558,79 +610,81 @@ export const ParticipantDashboardPage: React.FC = () => {
           )}
         </div>
 
-        {/* Section 6: PROBLEM RELEASE STATUS Component (Step 8 #7 & #8) */}
-        <div className="mb-8">
-          {isLoading ? (
-            <div className="p-8 rounded-2xl bg-white border border-[#E5E7EB] animate-pulse h-32" />
-          ) : isLive ? (
-            <div className="p-6 sm:p-8 rounded-2xl bg-[#164A36] text-white shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-6 relative overflow-hidden">
-              <div className="absolute right-0 top-0 bottom-0 opacity-5 pointer-events-none">
-                <Compass className="w-80 h-80 -mr-16 -mt-10" />
-              </div>
-
-              <div className="relative z-10 space-y-1.5">
-                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 text-emerald-200 text-xs font-bold tracking-wide uppercase">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                  Official Release Active
+        {/* Section 6: PROBLEM RELEASE STATUS Component — Only visible if NO selection made */}
+        {!hasSelection && (
+          <div className="mb-8">
+            {isLoading ? (
+              <div className="p-8 rounded-2xl bg-white border border-[#E5E7EB] animate-pulse h-32" />
+            ) : isLive ? (
+              <div className="p-6 sm:p-8 rounded-2xl bg-[#164A36] text-white shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-6 relative overflow-hidden">
+                <div className="absolute right-0 top-0 bottom-0 opacity-5 pointer-events-none">
+                  <Compass className="w-80 h-80 -mr-16 -mt-10" />
                 </div>
-                <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white uppercase">
-                  PROBLEM STATEMENTS ARE LIVE
-                </h2>
-                <p className="text-sm text-emerald-100/90 max-w-xl">
-                  {totalPublished} official {totalPublished === 1 ? 'challenge is' : 'challenges are'} available.
-                </p>
-              </div>
 
-              <div className="relative z-10 flex-shrink-0">
-                <Button
-                  to="/participant/problems"
-                  variant="secondary"
-                  size="lg"
-                  rightIcon={<ArrowRight className="w-4 h-4 ml-1" />}
-                  className="bg-white text-[#164A36] hover:bg-[#F7F5EF] font-bold shadow-xs"
-                >
-                  EXPLORE CHALLENGES →
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {scheduledReleaseTime && (
-                <CountdownTimer
-                  targetDate={scheduledReleaseTime}
-                  label="PROBLEM RELEASE IN"
-                  onExpire={() => {
-                    loadDashboardData();
-                  }}
-                />
-              )}
-
-              <div className="p-6 sm:p-8 rounded-2xl bg-white border border-[#E5E7EB] shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-                <div className="space-y-1">
-                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-50 text-amber-800 text-xs font-bold tracking-wide uppercase border border-amber-200">
-                    <Clock className="w-3.5 h-3.5 text-amber-600" />
-                    Awaiting Release
+                <div className="relative z-10 space-y-1.5">
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 text-emerald-200 text-xs font-bold tracking-wide uppercase">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                    Official Release Active
                   </div>
-                  <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-[#111827] uppercase">
-                    PROBLEM STATEMENTS ARE NOT LIVE
+                  <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white uppercase">
+                    PROBLEM STATEMENTS ARE LIVE
                   </h2>
-                  <p className="text-sm text-[#667085]">
-                    Official challenges will appear here once released by the organizers.
+                  <p className="text-sm text-emerald-100/90 max-w-xl">
+                    {totalPublished} official {totalPublished === 1 ? 'challenge is' : 'challenges are'} available.
                   </p>
                 </div>
 
-                <Button
-                  to="/guidelines"
-                  variant="outline"
-                  size="md"
-                  rightIcon={<BookOpen className="w-4 h-4 ml-1 text-[#667085]" />}
-                >
-                  Read Guidelines
-                </Button>
+                <div className="relative z-10 flex-shrink-0">
+                  <Button
+                    to="/participant/problems"
+                    variant="secondary"
+                    size="lg"
+                    rightIcon={<ArrowRight className="w-4 h-4 ml-1" />}
+                    className="bg-white text-[#164A36] hover:bg-[#F7F5EF] font-bold shadow-xs"
+                  >
+                    EXPLORE CHALLENGES →
+                  </Button>
+                </div>
               </div>
-            </div>
-          )}
-        </div>
+            ) : (
+              <div className="space-y-4">
+                {scheduledReleaseTime && (
+                  <CountdownTimer
+                    targetDate={scheduledReleaseTime}
+                    label="PROBLEM RELEASE IN"
+                    onExpire={() => {
+                      loadDashboardData();
+                    }}
+                  />
+                )}
+
+                <div className="p-6 sm:p-8 rounded-2xl bg-white border border-[#E5E7EB] shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+                  <div className="space-y-1">
+                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-50 text-amber-800 text-xs font-bold tracking-wide uppercase border border-amber-200">
+                      <Clock className="w-3.5 h-3.5 text-amber-600" />
+                      Awaiting Release
+                    </div>
+                    <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-[#111827] uppercase">
+                      PROBLEM STATEMENTS ARE NOT LIVE
+                    </h2>
+                    <p className="text-sm text-[#667085]">
+                      Official challenges will appear here once released by the organizers.
+                    </p>
+                  </div>
+
+                  <Button
+                    to="/guidelines"
+                    variant="outline"
+                    size="md"
+                    rightIcon={<BookOpen className="w-4 h-4 ml-1 text-[#667085]" />}
+                  >
+                    Read Guidelines
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Section 5: DASHBOARD QUICK ACTIONS */}
         <div className="my-8">
@@ -639,28 +693,52 @@ export const ParticipantDashboardPage: React.FC = () => {
           </h2>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {/* Action Card 1: EXPLORE PROBLEMS */}
-            <Link
-              to="/participant/problems"
-              className="group bg-white rounded-2xl border border-[#E5E7EB] p-7 shadow-xs hover:border-[#164A36] hover:shadow-md transition-all flex flex-col justify-between"
-            >
-              <div>
-                <div className="w-12 h-12 rounded-xl bg-[#EEF5F0] text-[#164A36] flex items-center justify-center mb-5 group-hover:scale-105 transition-transform">
-                  <Compass className="w-6 h-6" />
+            {/* Action Card 1: EXPLORE PROBLEMS or MY COMMITTED CHALLENGE */}
+            {hasSelection ? (
+              <Link
+                to="/participant/selected-problem"
+                className="group bg-white rounded-2xl border border-[#D5E6DB] p-7 shadow-xs hover:border-[#164A36] hover:shadow-md transition-all flex flex-col justify-between"
+              >
+                <div>
+                  <div className="w-12 h-12 rounded-xl bg-[#EEF5F0] text-[#164A36] flex items-center justify-center mb-5 group-hover:scale-105 transition-transform">
+                    <CheckCircle2 className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-lg font-bold text-[#111827] group-hover:text-[#164A36] transition-colors uppercase">
+                    COMMITTED CHALLENGE
+                  </h3>
+                  <p className="mt-2 text-sm text-[#667085] leading-relaxed">
+                    View full details, brief, and attachments for {selectedProblemId}.
+                  </p>
                 </div>
-                <h3 className="text-lg font-bold text-[#111827] group-hover:text-[#164A36] transition-colors uppercase">
-                  EXPLORE PROBLEMS
-                </h3>
-                <p className="mt-2 text-sm text-[#667085] leading-relaxed">
-                  Browse all officially released challenges.
-                </p>
-              </div>
 
-              <div className="mt-6 flex items-center gap-1.5 text-xs font-bold text-[#164A36]">
-                <span>Browse Challenges</span>
-                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-              </div>
-            </Link>
+                <div className="mt-6 flex items-center gap-1.5 text-xs font-bold text-[#164A36]">
+                  <span>View Selected Problem</span>
+                  <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                </div>
+              </Link>
+            ) : (
+              <Link
+                to="/participant/problems"
+                className="group bg-white rounded-2xl border border-[#E5E7EB] p-7 shadow-xs hover:border-[#164A36] hover:shadow-md transition-all flex flex-col justify-between"
+              >
+                <div>
+                  <div className="w-12 h-12 rounded-xl bg-[#EEF5F0] text-[#164A36] flex items-center justify-center mb-5 group-hover:scale-105 transition-transform">
+                    <Compass className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-lg font-bold text-[#111827] group-hover:text-[#164A36] transition-colors uppercase">
+                    EXPLORE PROBLEMS
+                  </h3>
+                  <p className="mt-2 text-sm text-[#667085] leading-relaxed">
+                    Browse all officially released challenges.
+                  </p>
+                </div>
+
+                <div className="mt-6 flex items-center gap-1.5 text-xs font-bold text-[#164A36]">
+                  <span>Browse Challenges</span>
+                  <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                </div>
+              </Link>
+            )}
 
             {/* Action Card 2: MY TEAM */}
             <Link
