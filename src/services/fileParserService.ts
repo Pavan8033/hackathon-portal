@@ -472,7 +472,7 @@ export class FileParserService {
   /**
    * PDF text extractor for problem statements
    * Recognizes structured problem statement blocks:
-   * e.g. "Problem 1: [Title]", "PS-01: [Title]", or bulleted challenge blocks
+   * e.g. "PS-01 — Title", "Problem 1: Title", "PS-01: Title", etc.
    */
   private static async extractProblemRowsFromPDF(
     buffer: ArrayBuffer
@@ -481,7 +481,16 @@ export class FileParserService {
 
     try {
       const pdfjs = await import('pdfjs-dist');
-      const loadingTask = pdfjs.getDocument({ data: new Uint8Array(buffer) });
+      if (!pdfjs.GlobalWorkerOptions.workerSrc) {
+        pdfjs.GlobalWorkerOptions.workerSrc = typeof window !== 'undefined'
+          ? `${window.location.origin}/pdf.worker.min.js`
+          : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      }
+
+      const loadingTask = pdfjs.getDocument({
+        data: new Uint8Array(buffer),
+        useSystemFonts: true,
+      });
       const pdf = await loadingTask.promise;
       const pages: string[] = [];
 
@@ -494,55 +503,134 @@ export class FileParserService {
         pages.push(text);
       }
       fullText = pages.join('\n\n');
-    } catch {
-      // Stream fallback
-      fullText = new TextDecoder('utf-8', { fatal: false }).decode(buffer);
+    } catch (primaryErr: any) {
+      console.warn('[FileParserService] Local PDF worker failed, trying CDN fallback:', primaryErr);
+      try {
+        const pdfjs = await import('pdfjs-dist');
+        pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        const loadingTask = pdfjs.getDocument({
+          data: new Uint8Array(buffer),
+          useSystemFonts: true,
+        });
+        const pdf = await loadingTask.promise;
+        const pages: string[] = [];
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          pages.push(textContent.items.map((item: any) => item.str || '').join(' '));
+        }
+        fullText = pages.join('\n\n');
+      } catch (fallbackErr: any) {
+        console.error('[FileParserService] PDF extraction failed completely:', fallbackErr);
+        throw new Error(
+          'Failed to extract text from the PDF document. Please make sure the PDF has selectable text (not scanned images), or upload as Excel (.xlsx, .xls) or CSV.'
+        );
+      }
+    }
+
+    if (!fullText || fullText.trim().length < 10) {
+      throw new Error(
+        'The uploaded PDF document contains no readable text. If this is a scanned document, please convert it to Excel or CSV before uploading.'
+      );
     }
 
     const rows: Record<string, any>[] = [];
+    const normalizedText = fullText.replace(/\r\n/g, '\n');
 
-    // Split text into lines or paragraphs
-    const paragraphs = fullText
-      .split(/\n{2,}|(?=Problem\s+\d+|PS\s*[-#:]?\s*\d+|Challenge\s+\d+)/i)
-      .map((p) => p.trim())
-      .filter((p) => p.length > 20);
+    // Split on headers such as "PS-01 — Title", "PS-01: Title", "Problem 1: Title", "Challenge 1 - Title"
+    const headerRegex = /(?:^|\n|\s{2,})(PS[-_\s]*\d+|Problem\s*(?:Statement)?\s*[-#:]?\s*\d+|Challenge\s*[-#:]?\s*\d+)\s*[-—–:]\s*/gi;
 
-    let problemIndex = 1;
-    for (const para of paragraphs) {
-      // Check if paragraph looks like a problem statement
-      const lines = para.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-      if (lines.length === 0) continue;
+    const matches: { idStr: string; index: number; fullMatch: string }[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = headerRegex.exec(normalizedText)) !== null) {
+      matches.push({
+        idStr: m[1],
+        index: m.index,
+        fullMatch: m[0],
+      });
+    }
 
-      const firstLine = lines[0];
-      const matchHeader = firstLine.match(/^(?:problem\s*(?:statement)?\s*(\d+|[a-z0-9_-]+)|ps\s*[-#:]?\s*(\d+|[a-z0-9_-]+)|challenge\s*(\d+|[a-z0-9_-]+))[:\s-]*(.*)$/i);
+    if (matches.length > 0) {
+      for (let i = 0; i < matches.length; i++) {
+        const cur = matches[i];
+        const next = matches[i + 1];
+        const chunk = normalizedText.slice(cur.index, next ? next.index : undefined).trim();
 
-      let id = `PS-${String(problemIndex).padStart(2, '0')}`;
-      let title = '';
-      let desc = '';
-      let category = 'General Innovation';
+        const psIdMatch = chunk.match(/^(?:PS[-_\s]*(\d+)|Problem\s*(?:Statement)?\s*(\d+)|Challenge\s*(\d+))\s*[-—–:]\s*/i);
+        const num = psIdMatch ? (psIdMatch[1] || psIdMatch[2] || psIdMatch[3]) : String(i + 1);
+        const cleanId = 'PS-' + num.padStart(2, '0');
 
-      if (matchHeader) {
-        const numPart = matchHeader[1] || matchHeader[2] || matchHeader[3];
-        if (numPart) {
-          id = `PS-${numPart.padStart(2, '0')}`;
+        const contentAfterId = chunk.replace(/^(?:PS[-_\s]*\d+|Problem\s*(?:Statement)?\s*\d+|Challenge\s*\d+)\s*[-—–:]\s*/i, '');
+
+        // Extract Title
+        const titleMatch = contentAfterId.match(/^(.*?)(?=\s*Category:|\s*Difficulty:|\s*Problem Description|\s*Description:|\s*Track:|$)/is);
+        let title = titleMatch ? titleMatch[1].trim() : `Problem ${cleanId}`;
+        title = title.replace(/[-—–:]\s*$/, '').trim();
+
+        // Extract Category
+        const catMatch = contentAfterId.match(/(?:Category|Domain|Track|Theme)[:\s]+(.*?)(?=\s*Difficulty:|\s*Level:|\s*Problem Description|\s*Description:|$)/is);
+        const category = catMatch ? catMatch[1].trim() : 'General Innovation';
+
+        // Extract Difficulty
+        const diffMatch = contentAfterId.match(/(?:Difficulty|Level|Complexity)[:\s]+(.*?)(?=\s*Problem Description|\s*Description:|\s*Suggested Evaluation Focus:|\s*Evaluation:|$)/is);
+        let difficulty: ProblemDifficulty = 'Intermediate';
+        if (diffMatch) {
+          const d = diffMatch[1].trim().toLowerCase();
+          if (d.includes('begin') || d.includes('easy')) difficulty = 'Beginner';
+          else if (d.includes('adv') || d.includes('hard')) difficulty = 'Advanced';
+          else difficulty = 'Intermediate';
         }
-        title = matchHeader[4]?.trim() || lines[1] || `Challenge ${numPart}`;
-        desc = lines.slice(matchHeader[4] ? 1 : 2).join(' ') || para;
-      } else {
-        // Fallback title from first sentence
-        title = firstLine.slice(0, 80);
-        desc = lines.slice(1).join(' ') || para;
-      }
 
-      // Check category in text
-      const catMatch = para.match(/(?:category|domain|track|theme)[:\s]+([^\n.,;]+)/i);
-      if (catMatch && catMatch[1]) {
-        category = catMatch[1].trim();
-      }
+        // Extract Description
+        const descMatch = contentAfterId.match(/(?:Problem Description|Description)[:\s]*(.*?)(?=\s*(?:Suggested Evaluation Focus|Evaluation Criteria|Evaluation|Constraints|Deliverables):|$)/is);
+        let desc = descMatch ? descMatch[1].trim() : '';
+        if (!desc) {
+          desc = contentAfterId
+            .replace(title, '')
+            .replace(/(?:Category|Domain|Track)[:\s]+[^\n]+/i, '')
+            .replace(/(?:Difficulty|Level)[:\s]+[^\n]+/i, '')
+            .trim();
+        }
 
-      if (title && desc) {
+        // Extract Evaluation Criteria
+        const evalMatch = contentAfterId.match(/(?:Suggested Evaluation Focus|Evaluation Criteria|Evaluation Focus|Criteria)[:\s]+(.*?)$/is);
+        const evaluationCriteria = evalMatch ? evalMatch[1].trim() : '';
+
+        if (title && (desc || title.length > 5)) {
+          rows.push({
+            'Problem ID': cleanId,
+            Title: title,
+            Category: category,
+            Difficulty: difficulty,
+            Description: desc || title,
+            'Evaluation Criteria': evaluationCriteria,
+          });
+        }
+      }
+    } else {
+      // Fallback: split by double line breaks or numbered paragraphs
+      const paragraphs = normalizedText
+        .split(/\n{2,}/)
+        .map((p) => p.trim())
+        .filter((p) => p.length > 20);
+
+      let problemIndex = 1;
+      for (const para of paragraphs) {
+        const lines = para.split(/\n/).map((l) => l.trim()).filter(Boolean);
+        if (lines.length === 0) continue;
+
+        const firstLine = lines[0];
+        let title = firstLine.slice(0, 100);
+        let desc = lines.slice(1).join(' ') || para;
+        let category = 'General Innovation';
+
+        const catMatch = para.match(/(?:category|domain|track|theme)[:\s]+([^\n.,;]+)/i);
+        if (catMatch && catMatch[1]) {
+          category = catMatch[1].trim();
+        }
+
         rows.push({
-          'Problem ID': id,
+          'Problem ID': `PS-${String(problemIndex).padStart(2, '0')}`,
           Title: title,
           Description: desc,
           Category: category,
@@ -550,18 +638,6 @@ export class FileParserService {
         });
         problemIndex++;
       }
-    }
-
-    // If no multi-block problems recognized, create a single problem from the PDF document
-    if (rows.length === 0 && fullText.trim().length > 30) {
-      const cleanLines = fullText.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 5);
-      rows.push({
-        'Problem ID': 'PS-01',
-        Title: cleanLines[0] || 'Imported Challenge Specification',
-        Description: cleanLines.slice(1, 10).join(' ') || fullText.slice(0, 500),
-        Category: 'General Innovation',
-        Difficulty: 'Intermediate',
-      });
     }
 
     return rows;
@@ -578,7 +654,16 @@ export class FileParserService {
 
     try {
       const pdfjs = await import('pdfjs-dist');
-      const loadingTask = pdfjs.getDocument({ data: new Uint8Array(buffer) });
+      if (!pdfjs.GlobalWorkerOptions.workerSrc) {
+        pdfjs.GlobalWorkerOptions.workerSrc = typeof window !== 'undefined'
+          ? `${window.location.origin}/pdf.worker.min.js`
+          : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      }
+
+      const loadingTask = pdfjs.getDocument({
+        data: new Uint8Array(buffer),
+        useSystemFonts: true,
+      });
       const pdf = await loadingTask.promise;
       const pages: string[] = [];
 
@@ -591,8 +676,28 @@ export class FileParserService {
         pages.push(text);
       }
       fullText = pages.join('\n');
-    } catch {
-      fullText = new TextDecoder('utf-8', { fatal: false }).decode(buffer);
+    } catch (primaryErr: any) {
+      console.warn('[FileParserService] Participant PDF worker fallback:', primaryErr);
+      try {
+        const pdfjs = await import('pdfjs-dist');
+        pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        const loadingTask = pdfjs.getDocument({
+          data: new Uint8Array(buffer),
+          useSystemFonts: true,
+        });
+        const pdf = await loadingTask.promise;
+        const pages: string[] = [];
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          pages.push(textContent.items.map((item: any) => item.str || '').join(' '));
+        }
+        fullText = pages.join('\n');
+      } catch (fallbackErr: any) {
+        throw new Error(
+          'Failed to extract participant text from PDF. Please upload roster as Excel (.xlsx, .xls) or CSV.'
+        );
+      }
     }
 
     const candidateRows: Record<string, any>[] = [];
@@ -620,3 +725,4 @@ export class FileParserService {
     return candidateRows;
   }
 }
+
