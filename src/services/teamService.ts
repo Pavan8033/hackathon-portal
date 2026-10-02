@@ -273,6 +273,10 @@ export class TeamService {
         };
         const bestCollege = cleanCollege(t.college) || cleanCollege(prev.college) || '';
 
+        // Status preservation
+        const preservedStatus =
+          t.status === 'inactive' || prev.status === 'inactive' ? 'inactive' : 'active';
+
         const merged: TeamRecord = {
           teamId: t.teamId || prev.teamId,
           teamName: bestTeamName,
@@ -286,7 +290,7 @@ export class TeamService {
           selectedProblemId: t.selectedProblemId || prev.selectedProblemId,
           selectedProblemTitle: t.selectedProblemTitle || prev.selectedProblemTitle,
           selectionDate: t.selectionDate || prev.selectionDate,
-          status: 'active',
+          status: preservedStatus,
           createdAt: prev.createdAt || t.createdAt || new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
@@ -294,7 +298,45 @@ export class TeamService {
       }
     }
 
-    const finalList = Array.from(mergedMap.values());
+    // Reconcile selections with active selections to prevent ghost/orphaned selections
+    let activeSelections: { teamId: string; problemId: string; problemTitle: string; selectedAt: string }[] = [];
+    try {
+      activeSelections = await SelectionService.getAllSelections();
+    } catch {
+      // ignore
+    }
+
+    const selectionByNormalizedTeam = new Map<string, { problemId: string; problemTitle: string; selectedAt: string }>();
+    activeSelections.forEach((s) => {
+      const nid = this.normalizeId(s.teamId);
+      if (nid) {
+        selectionByNormalizedTeam.set(nid, s);
+      }
+    });
+
+    const finalList = Array.from(mergedMap.values()).map((team) => {
+      const nid = this.normalizeId(team.teamId);
+      const sel = selectionByNormalizedTeam.get(nid);
+      if (sel) {
+        return {
+          ...team,
+          selectedProblemId: sel.problemId,
+          selectedProblemTitle: sel.problemTitle,
+          selectionDate: sel.selectedAt || team.selectionDate,
+        };
+      }
+      // If team has no active entry in teamSelections, clear any stale pointers
+      if (team.selectedProblemId && !sel) {
+        return {
+          ...team,
+          selectedProblemId: undefined,
+          selectedProblemTitle: undefined,
+          selectionDate: undefined,
+        };
+      }
+      return team;
+    });
+
     this.saveLocalTeams(finalList);
     return finalList;
   }

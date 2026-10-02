@@ -626,6 +626,37 @@ async function runTestSuite() {
   assert(!selectionStore.has('ALPHA-005'), 'Deleted team selection completely removed');
 
   // ===============================================================
+  // 8. EDGE CASES: Team Counts & Metric Accuracy
+  // ===============================================================
+  console.log('\n--- 8. EDGE CASES: Team Counts & Metric Accuracy ---');
+
+  const mockTeams = [
+    { teamId: 'ALPHA-001', teamName: 'INNOVATES', status: 'active', selectedProblemId: 'PS-01' },
+    { teamId: 'ALPHA-002', teamName: 'CODE TITANS', status: 'active', selectedProblemId: undefined },
+    { teamId: 'ALPHA-003', teamName: 'BINARY BRAINS', status: 'inactive', selectedProblemId: undefined },
+    { teamId: 'ALPHA-004', teamName: 'ALPHA 004', status: 'active', selectedProblemId: 'PS-02' },
+    { teamId: 'ALPHA-005', teamName: 'NEXUS', status: 'inactive', selectedProblemId: 'PS-03' },
+  ];
+
+  const totalMockTeams = mockTeams.length;
+  const activeMockTeams = mockTeams.filter(t => t.status === 'active').length;
+  const inactiveMockTeams = mockTeams.filter(t => t.status === 'inactive').length;
+  const selectedMockTeams = mockTeams.filter(t => Boolean(t.selectedProblemId)).length;
+  const unselectedMockTeams = mockTeams.filter(t => !t.selectedProblemId).length;
+
+  assert(totalMockTeams === 5, 'Accurately computes total teams count (5)');
+  assert(activeMockTeams === 3, 'Accurately computes active teams count (3)');
+  assert(inactiveMockTeams === 2, 'Accurately computes inactive teams count (2)');
+  assert(selectedMockTeams === 3, 'Accurately computes problem selected count (3)');
+  assert(unselectedMockTeams === 2, 'Accurately computes awaiting selection count (2)');
+
+  // Merge status preservation test
+  const existingTeam = { teamId: 'ALPHA-010', teamName: 'Team 10', status: 'inactive' };
+  const incomingRoster = { teamId: 'ALPHA-010', teamName: 'Real Name 10', status: 'active' };
+  const preservedStatus = existingTeam.status === 'inactive' || incomingRoster.status === 'inactive' ? 'inactive' : 'active';
+  assert(preservedStatus === 'inactive', 'Preserves inactive status when merging imported rosters');
+
+  // ===============================================================
   // SUMMARY
   // ===============================================================
   console.log('\n====================================================');

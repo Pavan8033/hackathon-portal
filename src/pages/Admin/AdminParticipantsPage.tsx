@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   AlertCircle,
   AlertTriangle,
+  Clock,
   X,
   Eye,
   RotateCcw,
@@ -247,6 +248,16 @@ export const AdminParticipantsPage: React.FC = () => {
   };
 
   // -------------------------------------------------------------
+  // -------------------------------------------------------------
+  // Live Team Calculations
+  // -------------------------------------------------------------
+  const totalTeams = teams.length;
+  const activeTeamsCount = teams.filter((t) => t.status === 'active').length;
+  const inactiveTeamsCount = teams.filter((t) => t.status === 'inactive').length;
+  const selectedTeamsCount = teams.filter((t) => Boolean(t.selectedProblemId)).length;
+  const unselectedTeamsCount = teams.filter((t) => !t.selectedProblemId).length;
+
+  // -------------------------------------------------------------
   // Filtered List
   // -------------------------------------------------------------
   const filteredTeams = teams.filter((team) => {
@@ -268,7 +279,7 @@ export const AdminParticipantsPage: React.FC = () => {
   return (
     <AdminLayout
       title="PARTICIPANT TEAMS"
-      description="Import and manage registered hackathon teams."
+      description="Import, inspect, and manage registered hackathon teams and their live challenge allocations."
       actionButton={
         <div className="flex items-center gap-2.5">
           <Button
@@ -297,6 +308,81 @@ export const AdminParticipantsPage: React.FC = () => {
         </div>
       }
     >
+      {/* Top Stat Summary Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        {/* TOTAL TEAMS */}
+        <div className="p-5 rounded-2xl bg-white border border-[#E5E7EB] shadow-xs flex flex-col justify-between">
+          <div className="flex items-center justify-between text-xs mb-2">
+            <span className="font-bold text-[#667085] tracking-wider uppercase text-[11px]">
+              TOTAL TEAMS
+            </span>
+            <Users className="w-4 h-4 text-[#667085]" />
+          </div>
+          <div>
+            <span className="text-3xl font-extrabold text-[#111827] tracking-tight leading-none font-sans">
+              {isLoading ? '...' : totalTeams}
+            </span>
+            <p className="mt-1.5 text-xs text-[#667085]">
+              {activeTeamsCount} active, {inactiveTeamsCount} inactive
+            </p>
+          </div>
+        </div>
+
+        {/* ACTIVE TEAMS */}
+        <div className="p-5 rounded-2xl bg-[#EEF5F0] border border-[#D5E6DB] shadow-xs flex flex-col justify-between">
+          <div className="flex items-center justify-between text-xs mb-2">
+            <span className="font-bold text-[#164A36] tracking-wider uppercase text-[11px]">
+              ACTIVE TEAMS
+            </span>
+            <UserCheck className="w-4 h-4 text-[#164A36]" />
+          </div>
+          <div>
+            <span className="text-3xl font-extrabold text-[#164A36] tracking-tight leading-none font-sans">
+              {isLoading ? '...' : activeTeamsCount}
+            </span>
+            <p className="mt-1.5 text-xs text-[#164A36]/80 font-medium">
+              Ready for problem selection
+            </p>
+          </div>
+        </div>
+
+        {/* PROBLEM SELECTED */}
+        <div className="p-5 rounded-2xl bg-white border border-[#E5E7EB] shadow-xs flex flex-col justify-between">
+          <div className="flex items-center justify-between text-xs mb-2">
+            <span className="font-bold text-[#667085] tracking-wider uppercase text-[11px]">
+              PROBLEM SELECTED
+            </span>
+            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+          </div>
+          <div>
+            <span className="text-3xl font-extrabold text-emerald-700 tracking-tight leading-none font-sans">
+              {isLoading ? '...' : selectedTeamsCount}
+            </span>
+            <p className="mt-1.5 text-xs text-[#667085]">
+              Confirmed challenge selections
+            </p>
+          </div>
+        </div>
+
+        {/* AWAITING SELECTION */}
+        <div className="p-5 rounded-2xl bg-white border border-[#E5E7EB] shadow-xs flex flex-col justify-between">
+          <div className="flex items-center justify-between text-xs mb-2">
+            <span className="font-bold text-[#667085] tracking-wider uppercase text-[11px]">
+              AWAITING SELECTION
+            </span>
+            <Clock className="w-4 h-4 text-amber-600" />
+          </div>
+          <div>
+            <span className="text-3xl font-extrabold text-amber-700 tracking-tight leading-none font-sans">
+              {isLoading ? '...' : unselectedTeamsCount}
+            </span>
+            <p className="mt-1.5 text-xs text-[#667085]">
+              Pending problem choice
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Search & Filter Toolbar */}
       <div className="bg-white rounded-2xl border border-[#E5E7EB] p-4 sm:p-5 shadow-xs mb-6 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
         {/* Search */}
@@ -312,19 +398,26 @@ export const AdminParticipantsPage: React.FC = () => {
         </div>
 
         {/* Status Filter */}
-        <div className="flex items-center gap-2">
-          <Filter className="w-4 h-4 text-[#667085] shrink-0" />
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-3 py-2 text-xs font-semibold rounded-xl border border-[#E5E7EB] bg-white text-[#111827] focus:outline-none focus:ring-2 focus:ring-[#164A36]"
-          >
-            <option value="all">All Teams ({teams.length})</option>
-            <option value="active">Active Only</option>
-            <option value="inactive">Inactive Only</option>
-            <option value="selected">Problem Selected</option>
-            <option value="unselected">Not Selected</option>
-          </select>
+        <div className="flex flex-wrap items-center gap-3">
+          {(searchQuery.trim() || statusFilter !== 'all') && (
+            <span className="text-xs text-[#667085] font-medium">
+              Showing <strong>{filteredTeams.length}</strong> of <strong>{totalTeams}</strong>
+            </span>
+          )}
+          <div className="flex items-center gap-2">
+            <Filter className="w-4 h-4 text-[#667085] shrink-0" />
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="px-3 py-2 text-xs font-semibold rounded-xl border border-[#E5E7EB] bg-white text-[#111827] focus:outline-none focus:ring-2 focus:ring-[#164A36]"
+            >
+              <option value="all">All Teams ({totalTeams})</option>
+              <option value="active">Active Only ({activeTeamsCount})</option>
+              <option value="inactive">Inactive Only ({inactiveTeamsCount})</option>
+              <option value="selected">Problem Selected ({selectedTeamsCount})</option>
+              <option value="unselected">Not Selected ({unselectedTeamsCount})</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -393,7 +486,6 @@ export const AdminParticipantsPage: React.FC = () => {
                 <th className="px-5 py-3.5">Team</th>
                 <th className="px-5 py-3.5">Team Lead</th>
                 <th className="px-5 py-3.5">Registration Number</th>
-                <th className="px-5 py-3.5">Members</th>
                 <th className="px-5 py-3.5">Selected Problem</th>
                 <th className="px-5 py-3.5">Status</th>
                 <th className="px-5 py-3.5 text-right">Actions</th>
@@ -402,13 +494,13 @@ export const AdminParticipantsPage: React.FC = () => {
             <tbody className="divide-y divide-[#E5E7EB] text-[#111827]">
               {isLoading ? (
                 <tr>
-                  <td colSpan={8} className="px-5 py-12 text-center text-[#667085]">
+                  <td colSpan={7} className="px-5 py-12 text-center text-[#667085]">
                     Loading registered teams...
                   </td>
                 </tr>
               ) : filteredTeams.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-5 py-12 text-center text-[#667085]">
+                  <td colSpan={7} className="px-5 py-12 text-center text-[#667085]">
                     {searchQuery
                       ? 'No teams match your search criteria.'
                       : 'No participant teams have been imported yet. Click "Import Participants" above to add your Excel or CSV list.'}
@@ -460,14 +552,6 @@ export const AdminParticipantsPage: React.FC = () => {
                     {/* Registration Number */}
                     <td className="px-5 py-4 font-mono text-xs text-[#164A36] font-semibold">
                       {t.teamLeadRegistrationNumber || (t.credentialHash ? '• Hashed & Protected •' : 'N/A')}
-                    </td>
-
-                    {/* Members */}
-                    <td className="px-5 py-4">
-                      <span className="inline-flex items-center gap-1 font-semibold text-xs text-[#4B5563] bg-[#EEF5F0] px-2 py-0.5 rounded">
-                        <Users className="w-3.5 h-3.5 text-[#164A36]" />
-                        {t.teamMembers?.length || 1} members
-                      </span>
                     </td>
 
                     {/* Selected Problem */}
