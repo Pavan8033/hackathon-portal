@@ -19,6 +19,73 @@ export interface ProblemParseOptions {
 }
 
 export class FileParserService {
+  /**
+   * Smart Header Detector: Finds the actual header row in a spreadsheet,
+   * skipping title banners, blank lines, or metadata rows at the top.
+   */
+  public static extractJsonFromSheet(worksheet: XLSX.WorkSheet): Record<string, any>[] {
+    const rawMatrix = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1, defval: '' });
+    if (!rawMatrix || rawMatrix.length === 0) return [];
+
+    let headerRowIndex = 0;
+    let maxMatchCount = 0;
+
+    // Scan up to first 15 rows for key headers
+    for (let r = 0; r < Math.min(15, rawMatrix.length); r++) {
+      const row = rawMatrix[r];
+      if (!Array.isArray(row)) continue;
+
+      let matchCount = 0;
+      for (const cell of row) {
+        const k = String(cell || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (
+          k === 'teamid' ||
+          k === 'id' ||
+          k.includes('team') ||
+          k.includes('lead') ||
+          k.includes('reg') ||
+          k.includes('member') ||
+          k.includes('problem') ||
+          k.includes('title') ||
+          k.includes('user') ||
+          k.includes('username')
+        ) {
+          matchCount++;
+        }
+      }
+
+      if (matchCount > maxMatchCount) {
+        maxMatchCount = matchCount;
+        headerRowIndex = r;
+      }
+    }
+
+    const headers = (rawMatrix[headerRowIndex] || []).map((h, colIdx) => {
+      const clean = String(h || '').trim();
+      return clean || `col_${colIdx}`;
+    });
+
+    const result: Record<string, any>[] = [];
+    for (let r = headerRowIndex + 1; r < rawMatrix.length; r++) {
+      const rowData = rawMatrix[r];
+      if (!Array.isArray(rowData)) continue;
+
+      const obj: Record<string, any> = {};
+      let hasData = false;
+      headers.forEach((hdr, colIdx) => {
+        const val = rowData[colIdx] !== undefined ? String(rowData[colIdx]).trim() : '';
+        if (val) hasData = true;
+        obj[hdr] = val;
+      });
+
+      if (hasData) {
+        result.push(obj);
+      }
+    }
+
+    return result;
+  }
+
   // ==========================================================================
   // 1. PARTICIPANTS LIST PARSER (.xlsx, .xls, .csv, .pdf)
   // Columns: Team ID (username), Team Name, Password, (Lead Name, Email, etc.)
@@ -40,7 +107,7 @@ export class FileParserService {
       const workbook = XLSX.read(text, { type: 'string' });
       const firstSheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[firstSheetName];
-      rawRows = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { defval: '' });
+      rawRows = this.extractJsonFromSheet(worksheet);
     } else if (fileExtension === 'xlsx' || fileExtension === 'xls') {
       const buffer = await file.arrayBuffer();
       const workbook = XLSX.read(buffer, { type: 'array' });
@@ -61,7 +128,7 @@ export class FileParserService {
           }
         }
       }
-      rawRows = XLSX.utils.sheet_to_json<Record<string, any>>(sheetToUse, { defval: '' });
+      rawRows = this.extractJsonFromSheet(sheetToUse);
     } else if (fileExtension === 'pdf') {
       const buffer = await file.arrayBuffer();
       rawRows = await this.extractParticipantRowsFromPDF(buffer, file.name);
@@ -91,13 +158,13 @@ export class FileParserService {
       const workbook = XLSX.read(text, { type: 'string' });
       const firstSheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[firstSheetName];
-      rawRows = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { defval: '' });
+      rawRows = this.extractJsonFromSheet(worksheet);
     } else if (fileExtension === 'xlsx' || fileExtension === 'xls') {
       const buffer = await file.arrayBuffer();
       const workbook = XLSX.read(buffer, { type: 'array' });
       const firstSheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[firstSheetName];
-      rawRows = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { defval: '' });
+      rawRows = this.extractJsonFromSheet(worksheet);
     } else if (fileExtension === 'pdf') {
       const buffer = await file.arrayBuffer();
       rawRows = await this.extractProblemRowsFromPDF(buffer);
@@ -126,13 +193,13 @@ export class FileParserService {
       const workbook = XLSX.read(text, { type: 'string' });
       const firstSheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[firstSheetName];
-      rawRows = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { defval: '' });
+      rawRows = this.extractJsonFromSheet(worksheet);
     } else {
       const buffer = await file.arrayBuffer();
       const workbook = XLSX.read(buffer, { type: 'array' });
       const firstSheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[firstSheetName];
-      rawRows = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { defval: '' });
+      rawRows = this.extractJsonFromSheet(worksheet);
     }
 
     return this.validateAndNormalizeCredentialRows(rawRows);
@@ -246,105 +313,140 @@ export class FileParserService {
   }
 
   private static isTeamIdKey(key: string): boolean {
+    const k = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (k.includes('lead') || k.includes('member') || k.includes('mail') || k.includes('phone') || k.includes('reg') || k.includes('roll')) {
+      return false;
+    }
     return (
-      key === 'teamid' ||
-      key === 'id' ||
-      key === 'teamcode' ||
-      key === 'username' ||
-      key === 'userid' ||
-      key === 'user' ||
-      key === 'loginid' ||
-      key === 'teamidentifier'
+      k === 'teamid' ||
+      k === 'id' ||
+      k === 'teamcode' ||
+      k === 'teamno' ||
+      k === 'teamnumber' ||
+      k === 'username' ||
+      k === 'userid' ||
+      k === 'user' ||
+      k === 'loginid' ||
+      k === 'teamidentifier' ||
+      k === 'slno' ||
+      k === 'sno'
     );
   }
 
   private static isTeamNameKey(key: string): boolean {
+    const k = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (k.includes('lead') || k.includes('id') || k.includes('reg') || k.includes('roll') || k.includes('member') || k.includes('mail') || k.includes('phone')) {
+      return false;
+    }
     return (
-      key === 'teamname' ||
-      key === 'team' ||
-      key === 'name' ||
-      key === 'groupname' ||
-      key === 'projectteam'
+      k === 'teamname' ||
+      k === 'team' ||
+      k === 'name' ||
+      k === 'groupname' ||
+      k === 'projectteam' ||
+      k === 'projectname' ||
+      k === 'projecttitle' ||
+      k === 'nameofteam' ||
+      k === 'teamtitle'
     );
   }
 
   private static isPasswordKey(key: string): boolean {
+    const k = key.toLowerCase().replace(/[^a-z0-9]/g, '');
     return (
-      key === 'password' ||
-      key === 'pass' ||
-      key === 'pwd' ||
-      key === 'teampassword' ||
-      key === 'teampass' ||
-      key === 'teamkey' ||
-      key === 'credential' ||
-      key === 'secret' ||
-      key === 'loginpassword'
+      k === 'password' ||
+      k === 'pass' ||
+      k === 'pwd' ||
+      k === 'teampassword' ||
+      k === 'teampass' ||
+      k === 'teamkey' ||
+      k === 'credential' ||
+      k === 'secret' ||
+      k === 'loginpassword'
     );
   }
 
   private static isTeamLeadKey(key: string): boolean {
+    const k = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (k.includes('reg') || k.includes('roll') || k.includes('mail') || k.includes('phone') || k.includes('mobile')) {
+      return false;
+    }
     return (
-      key === 'teamleadname' ||
-      key === 'teamlead' ||
-      key === 'teamleader' ||
-      key === 'teamleadername' ||
-      key === 'leadname' ||
-      key === 'leader' ||
-      key === 'leadername' ||
-      key === 'lead' ||
-      key === 'captain'
+      k === 'teamlead' ||
+      k === 'teamleadname' ||
+      k === 'teamleader' ||
+      k === 'teamleadername' ||
+      k === 'lead' ||
+      k === 'leader' ||
+      k === 'leadname' ||
+      k === 'leadername' ||
+      k === 'captain' ||
+      k === 'captainname' ||
+      k === 'nameoflead' ||
+      k === 'nameofteamlead' ||
+      k === 'nameofteamleader' ||
+      k === 'studentlead' ||
+      k === 'leadstudent' ||
+      k.includes('teamlead') ||
+      k.includes('leadername') ||
+      k.includes('leadname') ||
+      k.includes('nameoflead')
     );
   }
 
   private static isRegKey(key: string): boolean {
+    const k = key.toLowerCase().replace(/[^a-z0-9]/g, '');
     return (
-      key.includes('registration') ||
-      key.includes('regno') ||
-      key.includes('regnumber') ||
-      key.includes('regnum') ||
-      key.includes('leadreg') ||
-      key === 'reg' ||
-      key === 'regno' ||
-      key.includes('rollno') ||
-      key.includes('rollnum') ||
-      key.includes('rollnumber') ||
-      key.includes('hallticket') ||
-      key === 'htno' ||
-      key === 'usn' ||
-      key === 'pin' ||
-      key.includes('studentid') ||
-      key.includes('studentno')
+      k.includes('registration') ||
+      k.includes('regno') ||
+      k.includes('regnumber') ||
+      k.includes('regnum') ||
+      k.includes('leadreg') ||
+      k === 'reg' ||
+      k.includes('rollno') ||
+      k.includes('rollnum') ||
+      k.includes('rollnumber') ||
+      k.includes('hallticket') ||
+      k === 'htno' ||
+      k === 'usn' ||
+      k === 'pin' ||
+      k.includes('studentid') ||
+      k.includes('studentno')
     );
   }
 
   private static isMembersKey(key: string): boolean {
+    const k = key.toLowerCase().replace(/[^a-z0-9]/g, '');
     if (
-      key.includes('email') ||
-      key.includes('mail') ||
-      key.includes('phone') ||
-      key.includes('mobile') ||
-      key.includes('contact') ||
-      key.includes('reg') ||
-      key.includes('roll') ||
-      key.includes('type') ||
-      key.includes('track') ||
-      key.includes('dept') ||
-      key.includes('gender') ||
-      key.includes('year') ||
-      key.includes('hostel') ||
-      key.includes('utr') ||
-      key.includes('amount') ||
-      key.includes('fee') ||
-      key.includes('status')
+      k.includes('email') ||
+      k.includes('mail') ||
+      k.includes('phone') ||
+      k.includes('mobile') ||
+      k.includes('contact') ||
+      k.includes('reg') ||
+      k.includes('roll') ||
+      k.includes('lead') ||
+      k.includes('type') ||
+      k.includes('track') ||
+      k.includes('dept') ||
+      k.includes('gender') ||
+      k.includes('year') ||
+      k.includes('hostel') ||
+      k.includes('utr') ||
+      k.includes('amount') ||
+      k.includes('fee') ||
+      k.includes('status')
     ) {
       return false;
     }
     return (
-      key.includes('member') ||
-      key === 'teammembers' ||
-      key === 'participants' ||
-      key === 'roster' ||
-      key === 'students'
+      k.includes('member') ||
+      k === 'teammembers' ||
+      k === 'participants' ||
+      k === 'roster' ||
+      k === 'students' ||
+      k.startsWith('member') ||
+      k.startsWith('student')
     );
   }
 
@@ -534,6 +636,16 @@ export class FileParserService {
         }
       }
 
+      // Filter out duplicate header / title rows if present in data
+      const cleanLowerId = teamId.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const isHeaderTitleRow =
+        cleanLowerId === 'teamid' ||
+        cleanLowerId === 'id' ||
+        (teamLeadName.toLowerCase() === 'team lead' && teamName.toLowerCase().includes('team name'));
+      if (isHeaderTitleRow) {
+        return;
+      }
+
       // If teamId is missing, auto-fallback to teamName or generated ID
       // Skip completely empty row in Excel
       if (!teamId && !teamName && !teamLeadName && members.length === 0 && !teamLeadReg && !password) {
@@ -544,6 +656,8 @@ export class FileParserService {
       if (!teamId && teamName) {
         teamId = `TM-${new Date().getFullYear()}-${String(rowNumber).padStart(3, '0')}`;
       } else if (!teamName && teamId) {
+        teamName = `Team ${teamId}`;
+      } else if (teamName.toLowerCase() === 'team name' || teamName.toLowerCase() === 'teamname') {
         teamName = `Team ${teamId}`;
       }
 
@@ -563,14 +677,41 @@ export class FileParserService {
         errors.push(`Row ${rowNumber}: Missing Team ID and Team Name`);
       }
 
-      if (!teamLeadName) {
-        teamLeadName = teamName ? `${teamName} Lead` : 'Team Lead';
+      // Clean up teamLeadName if it's the title itself
+      if (
+        teamLeadName.toLowerCase() === 'team lead' ||
+        teamLeadName.toLowerCase() === 'team lead name' ||
+        teamLeadName.toLowerCase() === 'lead' ||
+        teamLeadName.toLowerCase() === 'leader'
+      ) {
+        teamLeadName = '';
       }
 
-      if (members.length === 0 && teamLeadName) {
-        members.push(teamLeadName);
-      } else if (teamLeadName && !members.some((m) => m.toLowerCase() === teamLeadName.toLowerCase())) {
-        members.unshift(teamLeadName);
+      // If teamLeadName is empty, check if members has real names
+      if (!teamLeadName) {
+        const realMember = members.find((m) => m && !/^\d+$/.test(m) && m.toLowerCase() !== 'team lead');
+        if (realMember) {
+          teamLeadName = realMember;
+        } else {
+          teamLeadName =
+            teamName && !teamName.toLowerCase().startsWith('team tm-') && !teamName.toLowerCase().startsWith('team alpha-')
+              ? `${teamName} Lead`
+              : '';
+        }
+      }
+
+      // Clean up members array: filter out placeholder titles or pure digit member counts
+      const cleanMembers = members.filter(
+        (m) =>
+          m &&
+          m.toLowerCase() !== 'team lead' &&
+          m.toLowerCase() !== 'members' &&
+          m.toLowerCase() !== 'participant institution'
+      );
+      if (cleanMembers.length === 0 && teamLeadName) {
+        cleanMembers.push(teamLeadName);
+      } else if (teamLeadName && !cleanMembers.some((m) => m.toLowerCase() === teamLeadName.toLowerCase())) {
+        cleanMembers.unshift(teamLeadName);
       }
 
       // Check duplicates within the uploaded file
@@ -602,7 +743,7 @@ export class FileParserService {
         teamLeadName,
         teamLeadRegistrationNumber: teamLeadReg,
         password,
-        members,
+        members: cleanMembers,
         email: email || `${teamId.toLowerCase().replace(/[^a-z0-9]/g, '')}@hackathon.local`,
         phone: phone || '+91 90000 00000',
         college: college || 'Participant Institution',

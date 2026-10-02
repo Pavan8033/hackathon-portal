@@ -35,6 +35,36 @@ export const TeamProfilePage: React.FC = () => {
   }, [team?.teamId]);
 
   const currentTeam = teamDetails || team;
+  const rawTeamName = currentTeam?.teamName?.trim() || '';
+  const teamId = currentTeam?.teamId?.trim() || '';
+  const teamName = rawTeamName || (teamId ? `Team ${teamId}` : 'Team');
+
+  const rawLead = currentTeam?.teamLeadName?.trim() || '';
+  const isLeadPlaceholder =
+    !rawLead ||
+    rawLead.toLowerCase() === 'team lead' ||
+    rawLead.toLowerCase() === 'leader' ||
+    rawLead.toLowerCase() === 'team lead name' ||
+    rawLead.toLowerCase() === rawTeamName.toLowerCase();
+  const teamLead = isLeadPlaceholder ? 'Leader (Pending Roster)' : rawLead;
+
+  const rawCollege = currentTeam?.college?.trim() || '';
+  const isCollegePlaceholder =
+    !rawCollege || rawCollege.toLowerCase() === 'participant institution';
+  const college = isCollegePlaceholder ? 'Enrolled Hackathon Team' : rawCollege;
+
+  // Filter out column titles and placeholder strings from member roster
+  const cleanMembers = (currentTeam?.teamMembers || []).filter(
+    (m) =>
+      m &&
+      m.trim().toLowerCase() !== 'team lead' &&
+      m.trim().toLowerCase() !== 'leader' &&
+      m.trim().toLowerCase() !== 'participant institution' &&
+      m.trim().toLowerCase() !== 'members' &&
+      m.trim() !== ''
+  );
+  const displayMembers =
+    cleanMembers.length > 0 ? cleanMembers : !isLeadPlaceholder ? [teamLead] : [];
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F7F5EF]">
@@ -63,7 +93,7 @@ export const TeamProfilePage: React.FC = () => {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 pb-6 border-b border-[#F3F4F6]">
             <div className="flex items-center gap-4">
               <div className="w-16 h-16 rounded-2xl bg-[#EEF5F0] text-[#164A36] border border-[#D5E6DB] flex items-center justify-center font-bold text-xl font-mono shrink-0">
-                {currentTeam?.teamName ? currentTeam.teamName.slice(0, 2).toUpperCase() : 'TM'}
+                {teamName ? teamName.slice(0, 2).toUpperCase() : 'TM'}
               </div>
               <div>
                 <span className="text-[11px] font-bold uppercase tracking-wider text-[#667085] block">
@@ -93,7 +123,7 @@ export const TeamProfilePage: React.FC = () => {
                 Team Name
               </span>
               <span className="text-base font-bold text-[#111827] mt-1 block truncate">
-                {currentTeam?.teamName || (currentTeam?.teamId ? `Team ${currentTeam.teamId}` : 'Team Alpha')}
+                {teamName}
               </span>
             </div>
 
@@ -103,7 +133,7 @@ export const TeamProfilePage: React.FC = () => {
                 Team ID
               </span>
               <span className="font-mono text-base font-bold text-[#164A36] mt-1 block">
-                {currentTeam?.teamId || 'TEAM-042'}
+                {teamId || 'ALPHA-001'}
               </span>
             </div>
 
@@ -113,9 +143,7 @@ export const TeamProfilePage: React.FC = () => {
                 Team Lead
               </span>
               <span className="text-base font-bold text-[#111827] mt-1 block truncate">
-                {currentTeam?.teamLeadName && currentTeam.teamLeadName.toLowerCase() !== 'team lead'
-                  ? currentTeam.teamLeadName
-                  : 'Leader (Pending Roster)'}
+                {teamLead}
               </span>
             </div>
 
@@ -125,9 +153,7 @@ export const TeamProfilePage: React.FC = () => {
                 Institution
               </span>
               <span className="text-sm font-semibold text-[#111827] mt-1 block truncate">
-                {currentTeam?.college && currentTeam.college.toLowerCase() !== 'participant institution'
-                  ? currentTeam.college
-                  : 'Enrolled Hackathon Team'}
+                {college}
               </span>
             </div>
 
@@ -138,7 +164,7 @@ export const TeamProfilePage: React.FC = () => {
               </span>
               <span className="text-xs font-medium text-[#111827] mt-1.5 block truncate flex items-center gap-1.5">
                 <Mail className="w-3.5 h-3.5 text-[#667085] shrink-0" />
-                <span>{currentTeam?.email || 'team@university.edu'}</span>
+                <span>{currentTeam?.email || `${(teamId || 'team').toLowerCase()}@hackathon.org`}</span>
               </span>
             </div>
 
@@ -149,7 +175,7 @@ export const TeamProfilePage: React.FC = () => {
               </span>
               <span className="text-xs font-medium text-[#111827] mt-1.5 block flex items-center gap-1.5">
                 <Phone className="w-3.5 h-3.5 text-[#667085] shrink-0" />
-                <span>{currentTeam?.phone || '+91 98765 00000'}</span>
+                <span>{currentTeam?.phone || 'Provided via Registration'}</span>
               </span>
             </div>
           </div>
@@ -163,16 +189,16 @@ export const TeamProfilePage: React.FC = () => {
                 Registered Participants
               </span>
               <h2 className="text-lg font-bold text-[#111827]">
-                Team Members ({currentTeam?.teamMembers?.length || 1})
+                Team Members ({displayMembers.length})
               </h2>
             </div>
             <Users className="w-5 h-5 text-[#667085]" />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {currentTeam?.teamMembers && currentTeam.teamMembers.length > 0 ? (
-              currentTeam.teamMembers.map((member, index) => {
-                const isLead = member.trim().toLowerCase() === (currentTeam.teamLeadName || '').trim().toLowerCase();
+            {displayMembers.length > 0 ? (
+              displayMembers.map((member, index) => {
+                const isLead = !isLeadPlaceholder && member.trim().toLowerCase() === teamLead.trim().toLowerCase();
                 return (
                   <div
                     key={index}

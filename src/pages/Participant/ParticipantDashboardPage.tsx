@@ -97,12 +97,20 @@ export const ParticipantDashboardPage: React.FC = () => {
   const isLeadPlaceholder =
     !rawLead ||
     rawLead.toLowerCase() === 'team lead' ||
+    rawLead.toLowerCase() === 'leader' ||
+    rawLead.toLowerCase() === 'team lead name' ||
     rawLead.toLowerCase() === rawTeamName.toLowerCase();
   const teamLead = isLeadPlaceholder ? 'Leader (Pending Roster)' : rawLead;
 
   // Filter out placeholder names like "Team Lead" from member list
   const memberList = (currentTeam?.teamMembers || []).filter(
-    (m) => m && m.trim().toLowerCase() !== 'team lead' && m.trim() !== ''
+    (m) =>
+      m &&
+      m.trim().toLowerCase() !== 'team lead' &&
+      m.trim().toLowerCase() !== 'leader' &&
+      m.trim().toLowerCase() !== 'participant institution' &&
+      m.trim().toLowerCase() !== 'members' &&
+      m.trim() !== ''
   );
   const displayMembers =
     memberList.length > 0 ? memberList : !isLeadPlaceholder ? [teamLead] : [];

@@ -15,44 +15,133 @@ const TEAMS_STORAGE_KEY = 'hackathon_portal_teams_v2';
 
 export class TeamService {
   /**
+   * Universal Team ID Normalizer: strips hyphens, spaces, underscores, and lowercases.
+   * e.g. "ALPHA-004", "alpha 004", "ALPHA004" -> "alpha004"
+   */
+  public static normalizeId(id?: string | null): string {
+    if (!id) return '';
+    return id.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  /**
    * Initialize and retrieve all teams
    */
   public static async getAllTeams(): Promise<TeamRecord[]> {
+    let list: TeamRecord[] = [];
     if (isFirebaseConfigured && db) {
       try {
         const teamsRef = collection(db, 'teams');
         const snapshot = await getDocs(teamsRef);
         if (!snapshot.empty) {
-          const list: TeamRecord[] = [];
           snapshot.forEach((d) => list.push(d.data() as TeamRecord));
-          this.saveLocalTeams(list);
-          return list;
         }
       } catch (err) {
         console.warn('[TeamService] Firestore fetch error, using local fallback:', err);
       }
     }
 
-    return this.getLocalTeams();
+    if (list.length === 0) {
+      list = this.getLocalTeams();
+    } else {
+      // Merge with any local additions
+      const local = this.getLocalTeams();
+      for (const loc of local) {
+        const cleanLocId = this.normalizeId(loc.teamId);
+        if (!list.some((r) => this.normalizeId(r.teamId) === cleanLocId)) {
+          list.push(loc);
+        }
+      }
+    }
+
+    // Deduplicate and merge any multiple records for the same team ID
+    const mergedMap = new Map<string, TeamRecord>();
+    for (const t of list) {
+      const nid = this.normalizeId(t.teamId);
+      if (!nid) continue;
+      if (!mergedMap.has(nid)) {
+        mergedMap.set(nid, t);
+      } else {
+        const prev = mergedMap.get(nid)!;
+        // Merge records, favoring real participant details over placeholder data
+        const prevCleanLead = prev.teamLeadName && prev.teamLeadName.toLowerCase() !== 'team lead';
+        const currCleanLead = t.teamLeadName && t.teamLeadName.toLowerCase() !== 'team lead';
+        const currHasRoster = (t.teamMembers?.length || 0) > 0 && currCleanLead;
+
+        const merged: TeamRecord = {
+          ...(currHasRoster ? prev : t),
+          ...(currHasRoster ? t : prev),
+          teamId: t.teamId || prev.teamId,
+          teamName:
+            t.teamName && !t.teamName.startsWith('Team TM-') && !t.teamName.startsWith('Team ALPHA-') && t.teamName.toLowerCase() !== 'team name'
+              ? t.teamName
+              : prev.teamName,
+          teamLeadName: currCleanLead ? t.teamLeadName : prevCleanLead ? prev.teamLeadName : t.teamLeadName || prev.teamLeadName,
+          teamLeadRegistrationNumber: t.teamLeadRegistrationNumber || prev.teamLeadRegistrationNumber,
+          credentialHash: t.credentialHash || prev.credentialHash,
+          selectedProblemId: t.selectedProblemId || prev.selectedProblemId,
+          selectedProblemTitle: t.selectedProblemTitle || prev.selectedProblemTitle,
+        };
+        mergedMap.set(nid, merged);
+      }
+    }
+
+    const finalList = Array.from(mergedMap.values());
+    this.saveLocalTeams(finalList);
+    return finalList;
   }
 
   /**
-   * Get team by ID
+   * Get team by ID, matching case-insensitively and alphanumeric-normalized
    */
   public static async getTeamById(teamId: string): Promise<TeamRecord | null> {
+    const cleanId = this.normalizeId(teamId);
+    if (!cleanId) return null;
+
     if (isFirebaseConfigured && db) {
       try {
         const teamDoc = await getDoc(doc(db, 'teams', teamId));
         if (teamDoc.exists()) {
-          return teamDoc.data() as TeamRecord;
+          const remote = teamDoc.data() as TeamRecord;
+          const hasRoster =
+            remote.teamMembers &&
+            remote.teamMembers.length > 0 &&
+            remote.teamLeadName &&
+            remote.teamLeadName.toLowerCase() !== 'team lead';
+          if (hasRoster) return remote;
         }
       } catch (err) {
         console.warn('[TeamService] Firestore getDoc error:', err);
       }
     }
 
-    const local = this.getLocalTeams();
-    return local.find((t) => t.teamId === teamId) || null;
+    const all = await this.getAllTeams();
+    const matches = all.filter(
+      (t) => this.normalizeId(t.teamId) === cleanId || this.normalizeId(t.teamName) === cleanId
+    );
+    if (matches.length === 0) return null;
+
+    // Pick best enriched record with actual participant roster details
+    return matches.reduce((best, curr) => {
+      const score = (r: TeamRecord) => {
+        let s = 0;
+        const cleanMems = (r.teamMembers || []).filter(
+          (m) => m && m.toLowerCase() !== 'team lead' && m.toLowerCase() !== 'participant institution'
+        );
+        s += cleanMems.length * 3;
+        if (r.teamLeadName && r.teamLeadName.toLowerCase() !== 'team lead' && r.teamLeadName.trim() !== '') s += 5;
+        if (
+          r.teamName &&
+          !r.teamName.startsWith('Team TM-') &&
+          !r.teamName.startsWith('Team ALPHA-') &&
+          r.teamName.toLowerCase() !== 'team name'
+        ) {
+          s += 4;
+        }
+        if (r.college && r.college.toLowerCase() !== 'participant institution') s += 1;
+        return s;
+      };
+      return score(curr) > score(best) ? curr : best;
+    });
   }
 
   /**
@@ -62,10 +151,10 @@ export class TeamService {
     identifier: string,
     password: string
   ): Promise<{ success: boolean; team?: TeamRecord; error?: string }> {
-    const trimmedId = identifier.trim().toLowerCase();
+    const cleanId = this.normalizeId(identifier);
     const trimmedPass = password.trim();
 
-    if (!trimmedId || !trimmedPass) {
+    if (!cleanId || !trimmedPass) {
       return {
         success: false,
         error: 'Please enter both your Team ID (Username) and Password.',
@@ -73,27 +162,50 @@ export class TeamService {
     }
 
     const teams = await this.getAllTeams();
-    // Check Team ID as username (exact or case-insensitive match), with teamName as secondary fallback
-    const team = teams.find(
+    const matchedTeams = teams.filter(
       (t) =>
-        t.teamId.trim().toLowerCase() === trimmedId ||
-        t.teamName.trim().toLowerCase() === trimmedId
+        this.normalizeId(t.teamId) === cleanId ||
+        this.normalizeId(t.teamName) === cleanId
     );
 
-    if (!team) {
+    if (matchedTeams.length === 0) {
       return {
         success: false,
         error: 'Invalid team credentials. Team ID not recognized. Please use the exact credentials provided by the organizers.',
       };
     }
 
+    // Pick the best enriched record with actual roster details
+    const team = matchedTeams.reduce((best, curr) => {
+      const score = (r: TeamRecord) => {
+        let s = 0;
+        const cleanMems = (r.teamMembers || []).filter(
+          (m) => m && m.toLowerCase() !== 'team lead' && m.toLowerCase() !== 'participant institution'
+        );
+        s += cleanMems.length * 3;
+        if (r.teamLeadName && r.teamLeadName.toLowerCase() !== 'team lead' && r.teamLeadName.trim() !== '') s += 5;
+        if (
+          r.teamName &&
+          !r.teamName.startsWith('Team TM-') &&
+          !r.teamName.startsWith('Team ALPHA-') &&
+          r.teamName.toLowerCase() !== 'team name'
+        ) {
+          s += 4;
+        }
+        return s;
+      };
+      return score(curr) > score(best) ? curr : best;
+    });
+
     // Verify password credential securely (via SHA-256 hash or plain fallback)
     const inputHash = await hashCredential(trimmedPass);
-    const matchesHash = Boolean(
-      (team.credentialHash && team.credentialHash === inputHash) ||
-      (team.teamLeadRegistrationNumber &&
-        team.teamLeadRegistrationNumber.trim().toLowerCase() === trimmedPass.toLowerCase()) ||
-      (team.teamId && team.teamId.trim().toLowerCase() === trimmedPass.toLowerCase())
+    const matchesHash = matchedTeams.some((t) =>
+      Boolean(
+        (t.credentialHash && t.credentialHash === inputHash) ||
+        (t.teamLeadRegistrationNumber &&
+          t.teamLeadRegistrationNumber.trim().toLowerCase() === trimmedPass.toLowerCase()) ||
+        (t.teamId && t.teamId.trim().toLowerCase() === trimmedPass.toLowerCase())
+      )
     );
 
     if (!matchesHash) {
@@ -111,7 +223,6 @@ export class TeamService {
       };
     }
 
-    // Sanitized team record
     return {
       success: true,
       team,
@@ -131,63 +242,82 @@ export class TeamService {
     const errors: string[] = [];
     let updatedCount = 0;
 
-    const normalize = (str: string) => str.trim().toLowerCase().replace(/\s+/g, ' ');
-
     for (const r of rows) {
-      const customId = r.teamId ? normalize(r.teamId) : '';
+      const customId = this.normalizeId(r.teamId);
+      if (!customId) continue;
 
-      // Check if team already exists by teamId -> MERGE with all participant details!
-      if (customId) {
-        const existingIndex = existing.findIndex((t) => normalize(t.teamId) === customId);
-        if (existingIndex >= 0) {
-          const prev = existing[existingIndex];
-          const secretPassword = (
-            r.password ||
-            r.teamLeadRegistrationNumber ||
-            prev.teamLeadRegistrationNumber ||
-            prev.teamId
-          ).trim();
-          const credentialHash = await hashCredential(secretPassword);
-          const members =
-            r.members && r.members.length > 0
-              ? r.members
-              : prev.teamMembers && prev.teamMembers.length > 0
-              ? prev.teamMembers
-              : [r.teamLeadName?.trim() || prev.teamLeadName || 'Team Lead'];
+      // Filter out title/header row if included in data
+      const isHeaderRow =
+        customId === 'teamid' ||
+        (r.teamLeadName?.toLowerCase() === 'team lead' && r.teamName?.toLowerCase() === 'team name');
+      if (isHeaderRow) continue;
 
-          const updated: TeamRecord = {
-            ...prev,
-            teamName: r.teamName?.trim() || prev.teamName,
-            teamLeadName: r.teamLeadName?.trim() || prev.teamLeadName,
-            teamLeadRegistrationNumber:
-              r.teamLeadRegistrationNumber?.trim() || prev.teamLeadRegistrationNumber,
-            credentialHash,
-            teamMembers: members,
-            email: r.email?.trim() || prev.email,
-            phone: r.phone?.trim() || prev.phone,
-            college: r.college?.trim() || prev.college,
-            status: 'active',
-            updatedAt: timestamp,
-          };
+      // Check if team already exists by normalized teamId -> MERGE with all participant details!
+      const existingIndex = existing.findIndex((t) => this.normalizeId(t.teamId) === customId);
+      if (existingIndex >= 0) {
+        const prev = existing[existingIndex];
+        const secretPassword = (
+          r.password ||
+          r.teamLeadRegistrationNumber ||
+          prev.teamLeadRegistrationNumber ||
+          prev.teamId
+        ).trim();
+        const credentialHash = await hashCredential(secretPassword);
 
-          existing[existingIndex] = updated;
+        // Extract real team name, real lead name, real members
+        const realTeamName =
+          r.teamName && r.teamName.toLowerCase() !== 'team name' && !r.teamName.toLowerCase().startsWith('team team ')
+            ? r.teamName.trim()
+            : prev.teamName && !prev.teamName.toLowerCase().startsWith('team team ')
+            ? prev.teamName
+            : `Team ${r.teamId}`;
 
-          if (isFirebaseConfigured && db) {
-            try {
-              await setDoc(doc(db, 'teams', updated.teamId), updated);
-            } catch (err) {
-              console.warn('[TeamService] Firestore merge error:', err);
-            }
+        const realLead =
+          r.teamLeadName && r.teamLeadName.toLowerCase() !== 'team lead' && r.teamLeadName.toLowerCase() !== 'leader'
+            ? r.teamLeadName.trim()
+            : prev.teamLeadName && prev.teamLeadName.toLowerCase() !== 'team lead'
+            ? prev.teamLeadName
+            : r.members?.[0] || '';
+
+        const cleanMembers = (r.members && r.members.length > 0 ? r.members : prev.teamMembers || [])
+          .filter((m) => m && m.toLowerCase() !== 'team lead' && m.toLowerCase() !== 'participant institution');
+
+        const updated: TeamRecord = {
+          ...prev,
+          teamId: r.teamId?.trim() || prev.teamId,
+          teamName: realTeamName,
+          teamLeadName: realLead,
+          teamLeadRegistrationNumber:
+            r.teamLeadRegistrationNumber?.trim() || prev.teamLeadRegistrationNumber,
+          credentialHash,
+          teamMembers: cleanMembers.length > 0 ? cleanMembers : realLead ? [realLead] : [],
+          email: r.email?.trim() || prev.email,
+          phone: r.phone?.trim() || prev.phone,
+          college:
+            r.college?.trim() && r.college.toLowerCase() !== 'participant institution'
+              ? r.college.trim()
+              : prev.college,
+          status: 'active',
+          updatedAt: timestamp,
+        };
+
+        existing[existingIndex] = updated;
+
+        if (isFirebaseConfigured && db) {
+          try {
+            await setDoc(doc(db, 'teams', updated.teamId), updated);
+          } catch (err) {
+            console.warn('[TeamService] Firestore merge error:', err);
           }
-
-          updatedCount++;
-          continue;
         }
+
+        updatedCount++;
+        continue;
       }
 
       // Check duplicate team name among existing teams
-      const normalizedName = normalize(r.teamName);
-      if (existing.some((t) => normalize(t.teamName) === normalizedName)) {
+      const normalizedName = this.normalizeId(r.teamName);
+      if (normalizedName && existing.some((t) => this.normalizeId(t.teamName) === normalizedName)) {
         errors.push(`Team "${r.teamName.trim()}" already exists in the directory.`);
         continue;
       }
@@ -203,16 +333,27 @@ export class TeamService {
       ).trim();
       const credentialHash = await hashCredential(secretPassword);
 
+      const realTeamName =
+        r.teamName && r.teamName.toLowerCase() !== 'team name'
+          ? r.teamName.trim()
+          : `Team ${assignedId}`;
+
+      const realLead =
+        r.teamLeadName && r.teamLeadName.toLowerCase() !== 'team lead' && r.teamLeadName.toLowerCase() !== 'leader'
+          ? r.teamLeadName.trim()
+          : r.members?.[0] || '';
+
+      const cleanMembers = (r.members || []).filter(
+        (m) => m && m.toLowerCase() !== 'team lead' && m.toLowerCase() !== 'participant institution'
+      );
+
       const record: TeamRecord = {
         teamId: assignedId,
-        teamName: r.teamName.trim(),
-        teamLeadName: r.teamLeadName.trim() || 'Team Lead',
+        teamName: realTeamName,
+        teamLeadName: realLead,
         teamLeadRegistrationNumber: r.teamLeadRegistrationNumber?.trim() || '',
         credentialHash,
-        teamMembers:
-          r.members && r.members.length > 0
-            ? r.members
-            : [r.teamLeadName?.trim() || r.teamName.trim()],
+        teamMembers: cleanMembers.length > 0 ? cleanMembers : realLead ? [realLead] : [],
         email: r.email?.trim() || '',
         phone: r.phone?.trim() || '',
         college: r.college?.trim() || 'Participant Institution',
@@ -255,19 +396,17 @@ export class TeamService {
     let importedCount = 0;
     let updatedCount = 0;
 
-    const normalize = (str: string) => str.trim().toLowerCase().replace(/\s+/g, ' ');
-
     for (const cred of credentials) {
       const cleanId = cred.teamId.trim();
       const cleanReg = cred.registrationNumber.trim();
       if (!cleanId || !cleanReg) continue;
 
-      const normId = normalize(cleanId);
-      const existingIndex = existing.findIndex((t) => normalize(t.teamId) === normId);
+      const normId = this.normalizeId(cleanId);
+      const existingIndex = existing.findIndex((t) => this.normalizeId(t.teamId) === normId);
       const credentialHash = await hashCredential(cleanReg);
 
       if (existingIndex >= 0) {
-        // Update existing team credentials
+        // Update existing team credentials ONLY, preserving all imported participant details!
         const prev = existing[existingIndex];
         const updated: TeamRecord = {
           ...prev,
@@ -290,13 +429,13 @@ export class TeamService {
         const newRecord: TeamRecord = {
           teamId: cleanId,
           teamName: `Team ${cleanId}`,
-          teamLeadName: 'Team Lead',
+          teamLeadName: '',
           teamLeadRegistrationNumber: cleanReg,
           credentialHash,
-          teamMembers: ['Team Lead'],
+          teamMembers: [],
           email: `${cleanId.toLowerCase().replace(/[^a-z0-9]/g, '')}@hackathon.local`,
           phone: '',
-          college: 'Participant Institution',
+          college: '',
           status: 'active',
           createdAt: timestamp,
           updatedAt: timestamp,
