@@ -178,6 +178,21 @@ export class AuthService {
   }
 
   /**
+   * Update team in active session if enriched details are retrieved
+   */
+  public static updateCurrentSessionTeam(updatedTeam: TeamRecord): void {
+    try {
+      const current = this.getCurrentSession();
+      if (current && current.role === 'team') {
+        current.team = updatedTeam;
+        this.saveSession(current);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
    * Save session
    */
   private static saveSession(session: AuthSession, persistent: boolean = true): void {
@@ -189,3 +204,4 @@ export class AuthService {
     }
   }
 }
+

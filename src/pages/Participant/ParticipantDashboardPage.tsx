@@ -19,6 +19,7 @@ import { Badge } from '../../components/ui/Badge';
 import { CountdownTimer } from '../../components/common/CountdownTimer';
 import { useAuth } from '../../context/AuthContext';
 import { useEvent } from '../../context/EventContext';
+import { AuthService } from '../../services/authService';
 import { TeamService } from '../../services/teamService';
 import { ProblemService } from '../../services/problemService';
 import { SelectionService } from '../../services/selectionService';
@@ -68,8 +69,9 @@ export const ParticipantDashboardPage: React.FC = () => {
       if (team?.teamId) {
         // Fetch and compare logged in Team ID with imported participant details
         const fullTeam = await TeamService.getTeamById(team.teamId);
-        if (fullTeam && fullTeam.teamId.trim().toLowerCase() === team.teamId.trim().toLowerCase()) {
+        if (fullTeam && TeamService.normalizeId(fullTeam.teamId) === TeamService.normalizeId(team.teamId)) {
           setTeamDetails(fullTeam);
+          AuthService.updateCurrentSessionTeam(fullTeam);
         }
         const currentSel = await SelectionService.getSelectionForTeam(team.teamId);
         setSelection(currentSel);
@@ -94,13 +96,39 @@ export const ParticipantDashboardPage: React.FC = () => {
   const totalPublished = publishedProblems.length;
   const isLive = totalPublished > 0;
 
-  const currentTeam = teamDetails || team;
-  const rawTeamName = currentTeam?.teamName?.trim() || '';
-  const teamId = currentTeam?.teamId?.trim() || '';
+  // Defensive merge of session team and fetched roster record to ensure rich details are never empty
+  const rawDetails = teamDetails || ({} as Partial<TeamRecord>);
+  const rawSession = team || ({} as Partial<TeamRecord>);
+  const teamId = (rawDetails.teamId || rawSession.teamId || '').trim();
+
+  // Combine and clean all team members
+  const memberList = (() => {
+    const list1 = (rawDetails.teamMembers || []).filter(
+      (m) =>
+        m &&
+        m.trim().toLowerCase() !== 'team lead' &&
+        m.trim().toLowerCase() !== 'leader' &&
+        m.trim().toLowerCase() !== 'participant institution' &&
+        m.trim().toLowerCase() !== 'members' &&
+        m.trim() !== ''
+    );
+    const list2 = (rawSession.teamMembers || []).filter(
+      (m) =>
+        m &&
+        m.trim().toLowerCase() !== 'team lead' &&
+        m.trim().toLowerCase() !== 'leader' &&
+        m.trim().toLowerCase() !== 'participant institution' &&
+        m.trim().toLowerCase() !== 'members' &&
+        m.trim() !== ''
+    );
+    return list1.length >= list2.length && list1.length > 0 ? list1 : list2.length > 0 ? list2 : list1;
+  })();
+
+  const rawTeamName = (rawDetails.teamName || rawSession.teamName || '').trim();
   const isGeneric = TeamService.isGenericTeamName(rawTeamName, teamId);
   const teamName = isGeneric ? (teamId ? `Team ${teamId}` : 'Team') : rawTeamName;
 
-  const rawLead = currentTeam?.teamLeadName?.trim() || '';
+  const rawLead = (rawDetails.teamLeadName || rawSession.teamLeadName || '').trim();
   const isLeadPlaceholder =
     !rawLead ||
     rawLead.toLowerCase() === 'team lead' ||
@@ -108,31 +136,27 @@ export const ParticipantDashboardPage: React.FC = () => {
     rawLead.toLowerCase() === 'team lead name' ||
     rawLead.toLowerCase() === rawTeamName.toLowerCase() ||
     rawLead.toLowerCase() === teamId.toLowerCase();
-  const teamLead = isLeadPlaceholder ? '' : rawLead;
+  const teamLead = isLeadPlaceholder ? (memberList[0] || '') : rawLead;
 
-  // Filter out placeholder names like "Team Lead" from member list
-  const memberList = (currentTeam?.teamMembers || []).filter(
-    (m) =>
-      m &&
-      m.trim().toLowerCase() !== 'team lead' &&
-      m.trim().toLowerCase() !== 'leader' &&
-      m.trim().toLowerCase() !== 'participant institution' &&
-      m.trim().toLowerCase() !== 'members' &&
-      m.trim() !== ''
-  );
-  const displayMembers =
-    memberList.length > 0 ? memberList : teamLead ? [teamLead] : [];
+  // Ensure teamLead is included in displayMembers
+  const displayMembers = (() => {
+    const mems = [...memberList];
+    if (teamLead && !mems.some((m) => m.toLowerCase() === teamLead.toLowerCase())) {
+      mems.unshift(teamLead);
+    }
+    return mems.length > 0 ? mems : teamLead ? [teamLead] : [];
+  })();
   const memberCount = displayMembers.length;
 
-  const rawCollege = currentTeam?.college?.trim() || '';
+  const rawCollege = (rawDetails.college || rawSession.college || '').trim();
   const isCollegePlaceholder =
     !rawCollege || rawCollege.toLowerCase() === 'participant institution';
   const college = isCollegePlaceholder ? '' : rawCollege;
 
-  const hasSelection = Boolean(selection || currentTeam?.selectedProblemId);
-  const selectedProblemId = selection?.problemId || currentTeam?.selectedProblemId || '';
-  const selectedProblemTitle = selection?.problemTitle || currentTeam?.selectedProblemTitle || selectedProblemDetail?.title || '';
-  const selectedTimestamp = selection?.selectedAt || currentTeam?.selectionDate || '';
+  const hasSelection = Boolean(selection || rawDetails.selectedProblemId || rawSession.selectedProblemId);
+  const selectedProblemId = selection?.problemId || rawDetails.selectedProblemId || rawSession.selectedProblemId || '';
+  const selectedProblemTitle = selection?.problemTitle || rawDetails.selectedProblemTitle || rawSession.selectedProblemTitle || selectedProblemDetail?.title || '';
+  const selectedTimestamp = selection?.selectedAt || rawDetails.selectionDate || rawSession.selectionDate || '';
   const formattedTime = formatSelectionDateTime(selectedTimestamp);
 
   const isSelectionOpen = settings ? settings.isSelectionOpen : true;

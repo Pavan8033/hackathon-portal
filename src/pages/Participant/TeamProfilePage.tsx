@@ -14,6 +14,7 @@ import { Footer } from '../../components/layout/Footer';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { useAuth } from '../../context/AuthContext';
+import { AuthService } from '../../services/authService';
 import { TeamService } from '../../services/teamService';
 import type { TeamRecord } from '../../types';
 
@@ -28,19 +29,46 @@ export const TeamProfilePage: React.FC = () => {
         // Compare login username with imported participant roster team id
         if (full && TeamService.normalizeId(full.teamId) === TeamService.normalizeId(team.teamId)) {
           setTeamDetails(full);
+          AuthService.updateCurrentSessionTeam(full);
         }
       }
     };
     loadProfile();
   }, [team?.teamId]);
 
-  const currentTeam = teamDetails || team;
-  const rawTeamName = currentTeam?.teamName?.trim() || '';
-  const teamId = currentTeam?.teamId?.trim() || '';
+  // Defensive merge of session team and fetched roster record to ensure rich details are never empty
+  const rawDetails = teamDetails || ({} as Partial<TeamRecord>);
+  const rawSession = team || ({} as Partial<TeamRecord>);
+  const teamId = (rawDetails.teamId || rawSession.teamId || '').trim();
+
+  // Combine and clean all team members
+  const memberList = (() => {
+    const list1 = (rawDetails.teamMembers || []).filter(
+      (m) =>
+        m &&
+        m.trim().toLowerCase() !== 'team lead' &&
+        m.trim().toLowerCase() !== 'leader' &&
+        m.trim().toLowerCase() !== 'participant institution' &&
+        m.trim().toLowerCase() !== 'members' &&
+        m.trim() !== ''
+    );
+    const list2 = (rawSession.teamMembers || []).filter(
+      (m) =>
+        m &&
+        m.trim().toLowerCase() !== 'team lead' &&
+        m.trim().toLowerCase() !== 'leader' &&
+        m.trim().toLowerCase() !== 'participant institution' &&
+        m.trim().toLowerCase() !== 'members' &&
+        m.trim() !== ''
+    );
+    return list1.length >= list2.length && list1.length > 0 ? list1 : list2.length > 0 ? list2 : list1;
+  })();
+
+  const rawTeamName = (rawDetails.teamName || rawSession.teamName || '').trim();
   const isGeneric = TeamService.isGenericTeamName(rawTeamName, teamId);
   const teamName = isGeneric ? (teamId ? `Team ${teamId}` : 'Team') : rawTeamName;
 
-  const rawLead = currentTeam?.teamLeadName?.trim() || '';
+  const rawLead = (rawDetails.teamLeadName || rawSession.teamLeadName || '').trim();
   const isLeadPlaceholder =
     !rawLead ||
     rawLead.toLowerCase() === 'team lead' ||
@@ -48,25 +76,39 @@ export const TeamProfilePage: React.FC = () => {
     rawLead.toLowerCase() === 'team lead name' ||
     rawLead.toLowerCase() === rawTeamName.toLowerCase() ||
     rawLead.toLowerCase() === teamId.toLowerCase();
-  const teamLead = isLeadPlaceholder ? '—' : rawLead;
+  const teamLead = isLeadPlaceholder ? (memberList[0] || '—') : rawLead;
 
-  const rawCollege = currentTeam?.college?.trim() || '';
+  // Ensure teamLead is included in displayMembers
+  const displayMembers = (() => {
+    const mems = [...memberList];
+    if (teamLead && teamLead !== '—' && !mems.some((m) => m.toLowerCase() === teamLead.toLowerCase())) {
+      mems.unshift(teamLead);
+    }
+    return mems.length > 0 ? mems : teamLead && teamLead !== '—' ? [teamLead] : [];
+  })();
+
+  const rawCollege = (rawDetails.college || rawSession.college || '').trim();
   const isCollegePlaceholder =
     !rawCollege || rawCollege.toLowerCase() === 'participant institution';
   const college = isCollegePlaceholder ? '' : rawCollege;
 
-  // Filter out column titles and placeholder strings from member roster
-  const cleanMembers = (currentTeam?.teamMembers || []).filter(
-    (m) =>
-      m &&
-      m.trim().toLowerCase() !== 'team lead' &&
-      m.trim().toLowerCase() !== 'leader' &&
-      m.trim().toLowerCase() !== 'participant institution' &&
-      m.trim().toLowerCase() !== 'members' &&
-      m.trim() !== ''
-  );
-  const displayMembers =
-    cleanMembers.length > 0 ? cleanMembers : teamLead && teamLead !== '—' ? [teamLead] : [];
+  const currentTeam: TeamRecord = {
+    teamId,
+    teamName,
+    teamLeadName: teamLead === '—' ? '' : teamLead,
+    teamLeadRegistrationNumber: rawDetails.teamLeadRegistrationNumber || rawSession.teamLeadRegistrationNumber || '',
+    credentialHash: rawDetails.credentialHash || rawSession.credentialHash || '',
+    teamMembers: displayMembers,
+    college,
+    email: rawDetails.email || rawSession.email || '',
+    phone: rawDetails.phone || rawSession.phone || '',
+    selectedProblemId: rawDetails.selectedProblemId || rawSession.selectedProblemId,
+    selectedProblemTitle: rawDetails.selectedProblemTitle || rawSession.selectedProblemTitle,
+    selectionDate: rawDetails.selectionDate || rawSession.selectionDate,
+    status: (rawDetails.status || rawSession.status || 'active') as any,
+    createdAt: rawDetails.createdAt || rawSession.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F7F5EF]">

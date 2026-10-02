@@ -8,6 +8,7 @@ import {
 } from 'firebase/firestore';
 import { db, isFirebaseConfigured } from '../lib/firebase';
 import { hashCredential } from '../utils/crypto';
+import { ALPHA_TEAMS_ROSTER } from '../data/alphaTeamsRoster';
 import type { TeamRecord, ParsedTeamRow, TeamStatus } from '../types';
 
 const TEAMS_STORAGE_KEY = 'hackathon_portal_teams_v2';
@@ -62,7 +63,10 @@ export class TeamService {
   public static async getAllTeams(): Promise<TeamRecord[]> {
     const list: TeamRecord[] = [];
 
-    // 1. Fetch from Firestore teams and participants collections
+    // 1. Include base official Alpha teams roster (60 teams)
+    list.push(...ALPHA_TEAMS_ROSTER);
+
+    // 2. Fetch from Firestore teams and participants collections
     if (isFirebaseConfigured && db) {
       try {
         const teamsRef = collection(db, 'teams');
@@ -86,10 +90,11 @@ export class TeamService {
       }
     }
 
-    // 2. Merge with local storage teams and participants
+    // 3. Merge with local storage teams and participants
     const local = this.getLocalTeams();
     const localParticipants = this.getLocalParticipants();
     list.push(...local, ...localParticipants);
+
 
     // 3. Deduplicate and merge any multiple records for the same team ID
     const mergedMap = new Map<string, TeamRecord>();
@@ -189,7 +194,12 @@ export class TeamService {
     const match = all.find(
       (t) => this.normalizeId(t.teamId) === cleanId || this.normalizeId(t.teamName) === cleanId
     );
-    return match || null;
+    if (match) return match;
+
+    const fallback = ALPHA_TEAMS_ROSTER.find(
+      (t) => this.normalizeId(t.teamId) === cleanId || this.normalizeId(t.teamName) === cleanId
+    );
+    return fallback || null;
   }
 
   /**
