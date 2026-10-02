@@ -13,6 +13,7 @@ import type { TeamRecord, ParsedTeamRow, TeamStatus } from '../types';
 
 const TEAMS_STORAGE_KEY = 'hackathon_portal_teams_v2';
 const PARTICIPANTS_STORAGE_KEY = 'hackathon_portal_participants_roster_v2';
+const DELETED_TEAMS_STORAGE_KEY = 'hackathon_portal_deleted_teams_v2';
 
 export class TeamService {
   /**
@@ -58,13 +59,117 @@ export class TeamService {
   }
 
   /**
-   * Initialize and retrieve all teams
+   * Get all deleted team ID tombstones across local storage and Firestore
+   */
+  public static async getDeletedTeamIds(): Promise<Set<string>> {
+    const set = new Set<string>();
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const stored = localStorage.getItem(DELETED_TEAMS_STORAGE_KEY);
+        if (stored) {
+          const arr = JSON.parse(stored);
+          if (Array.isArray(arr)) {
+            arr.forEach((id) => {
+              const clean = this.normalizeId(id);
+              if (clean) set.add(clean);
+            });
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    if (isFirebaseConfigured && db) {
+      try {
+        const snap = await getDocs(collection(db, 'deletedTeams'));
+        if (!snap.empty) {
+          snap.forEach((d) => {
+            const clean = this.normalizeId(d.id || d.data().teamId);
+            if (clean) set.add(clean);
+          });
+        }
+      } catch (err) {
+        console.warn('[TeamService] Firestore deletedTeams fetch error:', err);
+      }
+    }
+    return set;
+  }
+
+  /**
+   * Record a team ID as permanently deleted in local storage and Firestore
+   */
+  public static async recordDeletedTeamId(teamId: string): Promise<void> {
+    const clean = this.normalizeId(teamId);
+    if (!clean) return;
+
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const stored = localStorage.getItem(DELETED_TEAMS_STORAGE_KEY);
+        const arr: string[] = stored ? JSON.parse(stored) : [];
+        if (!arr.some((x) => this.normalizeId(x) === clean)) {
+          arr.push(teamId.trim());
+          localStorage.setItem(DELETED_TEAMS_STORAGE_KEY, JSON.stringify(arr));
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    if (isFirebaseConfigured && db) {
+      try {
+        await setDoc(doc(db, 'deletedTeams', clean), {
+          teamId: teamId.trim(),
+          deletedAt: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.warn('[TeamService] Firestore recordDeletedTeamId error:', err);
+      }
+    }
+  }
+
+  /**
+   * Remove deleted tombstone (e.g. when a team is re-imported or re-created)
+   */
+  public static async removeDeletedTeamId(teamId: string): Promise<void> {
+    const clean = this.normalizeId(teamId);
+    if (!clean) return;
+
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const stored = localStorage.getItem(DELETED_TEAMS_STORAGE_KEY);
+        if (stored) {
+          const arr: string[] = JSON.parse(stored);
+          const filtered = arr.filter((x) => this.normalizeId(x) !== clean);
+          localStorage.setItem(DELETED_TEAMS_STORAGE_KEY, JSON.stringify(filtered));
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    if (isFirebaseConfigured && db) {
+      try {
+        await deleteDoc(doc(db, 'deletedTeams', clean));
+      } catch (err) {
+        console.warn('[TeamService] Firestore removeDeletedTeamId error:', err);
+      }
+    }
+  }
+
+  /**
+   * Initialize and retrieve all active, non-deleted teams
    */
   public static async getAllTeams(): Promise<TeamRecord[]> {
+    const deletedSet = await this.getDeletedTeamIds();
     const list: TeamRecord[] = [];
 
-    // 1. Include base official Alpha teams roster (60 teams)
-    list.push(...ALPHA_TEAMS_ROSTER);
+    // 1. Include base official Alpha teams roster (excluding deleted tombstones)
+    for (const t of ALPHA_TEAMS_ROSTER) {
+      if (!deletedSet.has(this.normalizeId(t.teamId))) {
+        list.push(t);
+      }
+    }
 
     // 2. Fetch from Firestore teams and participants collections
     if (isFirebaseConfigured && db) {
@@ -72,7 +177,12 @@ export class TeamService {
         const teamsRef = collection(db, 'teams');
         const snapshot = await getDocs(teamsRef);
         if (!snapshot.empty) {
-          snapshot.forEach((d) => list.push(d.data() as TeamRecord));
+          snapshot.forEach((d) => {
+            const data = d.data() as TeamRecord;
+            if (!deletedSet.has(this.normalizeId(data.teamId))) {
+              list.push(data);
+            }
+          });
         }
 
         // Also fetch from participants collection
@@ -80,7 +190,12 @@ export class TeamService {
           const partRef = collection(db, 'participants');
           const partSnap = await getDocs(partRef);
           if (!partSnap.empty) {
-            partSnap.forEach((d) => list.push(d.data() as TeamRecord));
+            partSnap.forEach((d) => {
+              const data = d.data() as TeamRecord;
+              if (!deletedSet.has(this.normalizeId(data.teamId))) {
+                list.push(data);
+              }
+            });
           }
         } catch {
           // ignore participants fetch error
@@ -91,8 +206,8 @@ export class TeamService {
     }
 
     // 3. Merge with local storage teams and participants
-    const local = this.getLocalTeams();
-    const localParticipants = this.getLocalParticipants();
+    const local = this.getLocalTeams().filter((t) => !deletedSet.has(this.normalizeId(t.teamId)));
+    const localParticipants = this.getLocalParticipants().filter((t) => !deletedSet.has(this.normalizeId(t.teamId)));
     list.push(...local, ...localParticipants);
 
 
@@ -190,6 +305,9 @@ export class TeamService {
     const cleanId = this.normalizeId(teamId);
     if (!cleanId) return null;
 
+    const deletedSet = await this.getDeletedTeamIds();
+    if (deletedSet.has(cleanId)) return null;
+
     const all = await this.getAllTeams();
     const match = all.find(
       (t) => this.normalizeId(t.teamId) === cleanId || this.normalizeId(t.teamName) === cleanId
@@ -199,7 +317,10 @@ export class TeamService {
     const fallback = ALPHA_TEAMS_ROSTER.find(
       (t) => this.normalizeId(t.teamId) === cleanId || this.normalizeId(t.teamName) === cleanId
     );
-    return fallback || null;
+    if (fallback && !deletedSet.has(this.normalizeId(fallback.teamId))) {
+      return fallback;
+    }
+    return null;
   }
 
   /**
@@ -216,6 +337,14 @@ export class TeamService {
       return {
         success: false,
         error: 'Please enter both your Team ID (Username) and Password.',
+      };
+    }
+
+    const deletedSet = await this.getDeletedTeamIds();
+    if (deletedSet.has(cleanId)) {
+      return {
+        success: false,
+        error: 'Invalid team credentials. This team account has been deleted by organizers.',
       };
     }
 
@@ -303,6 +432,7 @@ export class TeamService {
     for (const r of rows) {
       const customId = this.normalizeId(r.teamId);
       if (!customId) continue;
+      await this.removeDeletedTeamId(r.teamId);
 
       // Filter out title/header row if included in data
       const isHeaderRow =
@@ -468,6 +598,7 @@ export class TeamService {
       const cleanId = cred.teamId.trim();
       const cleanReg = cred.registrationNumber.trim();
       if (!cleanId || !cleanReg) continue;
+      await this.removeDeletedTeamId(cleanId);
 
       const normId = this.normalizeId(cleanId);
       const existingIndex = existing.findIndex((t) => this.normalizeId(t.teamId) === normId);
@@ -670,18 +801,90 @@ export class TeamService {
   }
 
   /**
-   * Delete team record
+   * Delete team record and record persistent tombstone
    */
   public static async deleteTeam(teamId: string): Promise<void> {
+    const cleanId = this.normalizeId(teamId);
+    if (!cleanId) return;
+
+    // 1. Record in deleted tombstones
+    await this.recordDeletedTeamId(teamId);
+
+    // 2. Remove from local storage
     const teams = this.getLocalTeams();
-    const filtered = teams.filter((t) => t.teamId !== teamId);
-    this.saveLocalTeams(filtered);
+    const filteredTeams = teams.filter(
+      (t) => this.normalizeId(t.teamId) !== cleanId && t.teamId !== teamId
+    );
+    this.saveLocalTeams(filteredTeams);
+
+    const participants = this.getLocalParticipants();
+    const filteredParts = participants.filter(
+      (p) => this.normalizeId(p.teamId) !== cleanId && p.teamId !== teamId
+    );
+    this.saveLocalParticipants(filteredParts);
+
+    // 3. Remove from Firestore: teams, participants, teamSelections
+    if (isFirebaseConfigured && db) {
+      try {
+        await Promise.allSettled([
+          deleteDoc(doc(db, 'teams', teamId)),
+          deleteDoc(doc(db, 'teams', cleanId)),
+          deleteDoc(doc(db, 'participants', teamId)),
+          deleteDoc(doc(db, 'participants', cleanId)),
+          deleteDoc(doc(db, 'teamSelections', teamId)),
+          deleteDoc(doc(db, 'teamSelections', cleanId)),
+        ]);
+      } catch (err) {
+        console.warn('[TeamService] Firestore delete error:', err);
+      }
+    }
+  }
+
+  /**
+   * Delete multiple teams in bulk
+   */
+  public static async deleteMultipleTeams(teamIds: string[]): Promise<number> {
+    let count = 0;
+    for (const id of teamIds) {
+      await this.deleteTeam(id);
+      count++;
+    }
+    return count;
+  }
+
+  /**
+   * Delete all teams completely
+   */
+  public static async deleteAllTeams(): Promise<void> {
+    const all = await this.getAllTeams();
+    const allIds = new Set<string>();
+
+    all.forEach((t) => allIds.add(t.teamId));
+    ALPHA_TEAMS_ROSTER.forEach((t) => allIds.add(t.teamId));
+
+    for (const id of Array.from(allIds)) {
+      await this.recordDeletedTeamId(id);
+    }
+
+    this.saveLocalTeams([]);
+    this.saveLocalParticipants([]);
 
     if (isFirebaseConfigured && db) {
       try {
-        await deleteDoc(doc(db, 'teams', teamId));
+        const [teamsSnap, partsSnap, selsSnap] = await Promise.all([
+          getDocs(collection(db, 'teams')),
+          getDocs(collection(db, 'participants')),
+          getDocs(collection(db, 'teamSelections')),
+        ]);
+
+        const deletePromises: Promise<any>[] = [];
+        teamsSnap.forEach((d) => deletePromises.push(deleteDoc(d.ref)));
+        partsSnap.forEach((d) => deletePromises.push(deleteDoc(d.ref)));
+        selsSnap.forEach((d) => deletePromises.push(deleteDoc(d.ref)));
+
+        await Promise.allSettled(deletePromises);
       } catch (err) {
-        console.warn('[TeamService] Firestore delete error:', err);
+        console.warn('[TeamService] Firestore deleteAllTeams error:', err);
       }
     }
   }

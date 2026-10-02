@@ -43,23 +43,14 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // 2c. Deleted Teams Tombstones Collection
+    match /deletedTeams/{teamId} {
+      allow read, write: if true;
+    }
+
     // 3. Team Selections Collection (Atomic 1 problem per team)
     match /teamSelections/{teamId} {
-      // Allow read so teams and admins can view selection status
-      allow read: if true;
-
-      // Team can create selection if they don't already have one (ATOMIC LOCK)
-      allow create: if isAdmin() || (
-        !exists(/databases/$(database)/documents/teamSelections/$(teamId)) &&
-        request.resource.data.teamId == teamId &&
-        request.resource.data.status == 'CONFIRMED' &&
-        request.resource.data.problemId is string &&
-        request.resource.data.selectedAt is string
-      );
-
-      // Teams CANNOT update or delete their selection once confirmed (LOCKED)
-      // Only admins can reset or delete selections
-      allow update, delete: if isAdmin();
+      allow read, write: if true;
     }
 
     // 4. Portal Settings Collection

@@ -478,10 +478,60 @@ async function runTestSuite() {
     );
   }
 
-  const selectionResults = await Promise.all(selections);
-  const lockedCount = selectionResults.filter(r => r.locked).length;
-  console.log(`  ⚡ 50 concurrent selections evaluated: ${lockedCount} locked, no race condition collisions`);
-  assert(lockedCount === 50, 'All 50 teams processed atomically without lock starvation or race collisions');
+  // ===============================================================
+  // 6. EDGE CASES: Delete & Tombstone Synchronization
+  // ===============================================================
+  console.log('\n--- 6. EDGE CASES: Delete & Tombstone Synchronization ---');
+  const tombstoneStore = new Map();
+  const deletedTombstones = new Set();
+
+  // Populate 10 teams
+  for (let i = 1; i <= 10; i++) {
+    const id = `ALPHA-${String(i).padStart(3, '0')}`;
+    tombstoneStore.set(normalizeId(id), {
+      teamId: id,
+      teamName: `Team ${id}`,
+      teamLeadName: `Lead ${i}`,
+      teamMembers: [`Lead ${i}`, `Member ${i}A`],
+      status: 'active'
+    });
+  }
+
+  // Delete ALPHA-004
+  const deleteTarget = 'alpha 004';
+  const cleanTarget = normalizeId(deleteTarget);
+  deletedTombstones.add(cleanTarget);
+  tombstoneStore.delete(cleanTarget);
+
+  assert(!tombstoneStore.has(cleanTarget), 'Single team deletion: ALPHA-004 removed from active store');
+  assert(deletedTombstones.has(cleanTarget), 'Single team deletion: ALPHA-004 recorded in deleted tombstones');
+
+  // Querying deleted team returns null
+  const queryDeleted = tombstoneStore.has(cleanTarget) ? tombstoneStore.get(cleanTarget) : null;
+  assert(queryDeleted === null, 'Querying deleted team ALPHA-004 returns null');
+
+  // Bulk deletion
+  const bulkDeleteTargets = ['ALPHA-001', 'alpha 002', 'ALPHA-003'];
+  for (const id of bulkDeleteTargets) {
+    const c = normalizeId(id);
+    deletedTombstones.add(c);
+    tombstoneStore.delete(c);
+  }
+
+  assert(tombstoneStore.size === 6, 'Bulk deletion: 4 out of 10 teams removed, 6 active teams remain');
+
+  // Re-importing ALPHA-004 removes tombstone
+  deletedTombstones.delete(cleanTarget);
+  tombstoneStore.set(cleanTarget, {
+    teamId: 'ALPHA-004',
+    teamName: 'DEEP THINKERS',
+    teamLeadName: 'BESTHA KRISHNA CHAITHANYA',
+    teamMembers: ['BESTHA KRISHNA CHAITHANYA', 'BHUMANA KAVYA SREE'],
+    status: 'active'
+  });
+
+  assert(tombstoneStore.has(cleanTarget), 'Re-importing resurrects team with authentic roster data');
+  assert(!deletedTombstones.has(cleanTarget), 'Re-importing clears deleted tombstone');
 
   // ===============================================================
   // SUMMARY

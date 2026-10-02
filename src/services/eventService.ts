@@ -1,5 +1,6 @@
 import type { EventConfig } from '../types';
 import { SettingsService } from './settingsService';
+import { TeamService } from './teamService';
 
 const EVENT_STORAGE_KEY = 'hackathon_portal_event_config_v2';
 const EVENT_CHANGE_EVENT = 'hackathon_portal_event_changed';
@@ -139,8 +140,7 @@ export class EventService {
 
     // 1. Wipe Teams & Credentials if requested
     if (deleteTeams) {
-      localStorage.removeItem('hackathon_portal_teams_v2');
-      localStorage.setItem('hackathon_portal_teams_v2', JSON.stringify([]));
+      await TeamService.deleteAllTeams();
     }
 
     // 2. Wipe Selections
