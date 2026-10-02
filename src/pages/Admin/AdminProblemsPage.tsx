@@ -412,6 +412,7 @@ export const AdminProblemsPage: React.FC = () => {
                 </th>
                 <th className="px-5 py-3.5">Problem ID</th>
                 <th className="px-5 py-3.5">Title</th>
+                <th className="px-5 py-3.5">Description</th>
                 <th className="px-5 py-3.5">Category</th>
                 <th className="px-5 py-3.5">File</th>
                 <th className="px-5 py-3.5">Status</th>
@@ -424,13 +425,13 @@ export const AdminProblemsPage: React.FC = () => {
             <tbody className="divide-y divide-[#E5E7EB] text-[#111827]">
               {isLoading ? (
                 <tr>
-                  <td colSpan={10} className="px-5 py-12 text-center text-[#667085]">
+                  <td colSpan={11} className="px-5 py-12 text-center text-[#667085]">
                     Loading problem statements...
                   </td>
                 </tr>
               ) : filteredProblems.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-5 py-12 text-center text-[#667085]">
+                  <td colSpan={11} className="px-5 py-12 text-center text-[#667085]">
                     {searchQuery
                       ? 'No problems match your search.'
                       : 'No problem statements created yet. Click "Add Problem Statement" above to create one.'}
@@ -486,6 +487,13 @@ export const AdminProblemsPage: React.FC = () => {
                         >
                           {p.title}
                         </button>
+                      </td>
+
+                      {/* Description */}
+                      <td className="px-5 py-4 max-w-xs">
+                        <p className="text-xs text-[#4B5563] line-clamp-2 leading-relaxed" title={p.description}>
+                          {p.description || 'No description provided.'}
+                        </p>
                       </td>
 
                       {/* Category */}

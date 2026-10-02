@@ -247,7 +247,22 @@ export const AdminParticipantsPage: React.FC = () => {
     document.body.removeChild(link);
   };
 
-  // -------------------------------------------------------------
+  const handleResetRoster = async () => {
+    if (!window.confirm('Restore all 60 official participant teams and clear any deleted tombstones?')) {
+      return;
+    }
+    setIsLoading(true);
+    try {
+      await TeamService.resetToOfficialRoster();
+      showToast('Official 60-team directory restored successfully.', 'success', 'Roster Restored');
+      await loadTeams();
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to restore roster.', 'error', 'Error');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // -------------------------------------------------------------
   // Live Team Calculations
   // -------------------------------------------------------------
@@ -279,9 +294,19 @@ export const AdminParticipantsPage: React.FC = () => {
   return (
     <AdminLayout
       title="PARTICIPANT TEAMS"
-      description="Import, inspect, and manage registered hackathon teams and their live challenge allocations."
+      description="Import, inspect, and manage registered hackathon teams (any custom format or official roster) and their live challenge allocations."
       actionButton={
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <Button
+            variant="secondary"
+            size="md"
+            leftIcon={<RotateCcw className="w-4 h-4 text-[#164A36]" />}
+            onClick={handleResetRoster}
+            className="bg-white border-[#D5E6DB] text-[#164A36] hover:bg-[#EEF5F0]"
+            title="Restore default 60 Alpha teams and clear deleted tombstones"
+          >
+            RESTORE DEFAULT (60)
+          </Button>
           <Button
             variant="secondary"
             size="md"
@@ -889,25 +914,41 @@ export const AdminParticipantsPage: React.FC = () => {
 
               <div>
                 <div className="text-[11px] font-bold text-[#667085] uppercase mb-2">
-                  Roster Members ({selectedTeam.teamMembers.length})
+                  Roster Members ({(selectedTeam.teamMembers || []).length || 1})
                 </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {selectedTeam.teamMembers.map((m, idx) => (
-                    <span
-                      key={idx}
-                      className="px-2.5 py-1 rounded bg-[#EEF5F0] text-[#164A36] font-medium text-xs border border-[#D5E6DB]"
-                    >
-                      {m}
-                    </span>
-                  ))}
-                </div>
+                {(selectedTeam.teamMembers && selectedTeam.teamMembers.length > 0) ? (
+                  <div className="flex flex-wrap gap-2">
+                    {selectedTeam.teamMembers.map((m, idx) => {
+                      const isLead =
+                        m.trim().toLowerCase() === (selectedTeam.teamLeadName || '').trim().toLowerCase() ||
+                        idx === 0;
+                      return (
+                        <span
+                          key={idx}
+                          className="px-3 py-1.5 rounded-lg bg-[#EEF5F0] text-[#164A36] font-semibold text-xs border border-[#D5E6DB] flex items-center gap-1.5"
+                        >
+                          <span>{m}</span>
+                          {isLead && (
+                            <span className="text-[9px] bg-[#164A36] text-white px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">
+                              LEAD
+                            </span>
+                          )}
+                        </span>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-xl bg-[#F7F5EF] text-[#667085] text-xs font-medium">
+                    {selectedTeam.teamLeadName ? `${selectedTeam.teamLeadName} (Lead Representative)` : 'No additional enrolled members recorded.'}
+                  </div>
+                )}
               </div>
 
               <div className="p-3 rounded-xl bg-gray-50 text-xs text-[#667085] space-y-1">
-                <div>Email: {selectedTeam.email}</div>
-                <div>Phone: {selectedTeam.phone}</div>
-                <div>College: {selectedTeam.college}</div>
-                <div>Created: {new Date(selectedTeam.createdAt).toLocaleDateString()}</div>
+                <div><strong>Email:</strong> {selectedTeam.email || 'Not specified'}</div>
+                <div><strong>Phone:</strong> {selectedTeam.phone || 'Not specified'}</div>
+                <div><strong>Institution / College:</strong> {selectedTeam.college || 'Not specified'}</div>
+                <div><strong>Record Created:</strong> {new Date(selectedTeam.createdAt).toLocaleDateString()}</div>
               </div>
             </div>
 

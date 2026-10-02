@@ -960,26 +960,25 @@ export class FileParserService {
   }
 
   /**
-   * PDF text extractor for problem statements
-   * Recognizes structured problem statement blocks:
-   * e.g. "PS-01 — Title", "Problem 1: Title", "PS-01: Title", etc.
+   * Universal, resilient PDF text extractor
+   * Uses pdfjs-dist with multi-tier worker fallback, followed by raw stream binary text scanning
    */
-  private static async extractProblemRowsFromPDF(
-    buffer: ArrayBuffer
-  ): Promise<Record<string, any>[]> {
+  public static async extractTextFromPDFBuffer(buffer: ArrayBuffer): Promise<string> {
     let fullText = '';
 
+    // Tier 1: Try PDF.js with local worker
     try {
       const pdfjs = await import('pdfjs-dist');
-      if (!pdfjs.GlobalWorkerOptions.workerSrc) {
-        pdfjs.GlobalWorkerOptions.workerSrc = typeof window !== 'undefined'
-          ? `${window.location.origin}/pdf.worker.min.js`
-          : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      if (typeof window !== 'undefined') {
+        pdfjs.GlobalWorkerOptions.workerSrc = `${window.location.origin}/pdf.worker.min.js`;
+      } else {
+        pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
       }
 
       const loadingTask = pdfjs.getDocument({
         data: new Uint8Array(buffer),
         useSystemFonts: true,
+        isEvalSupported: false,
       });
       const pdf = await loadingTask.promise;
       const pages: string[] = [];
@@ -990,37 +989,91 @@ export class FileParserService {
         const text = textContent.items
           .map((item: any) => item.str || '')
           .join(' ');
-        pages.push(text);
+        if (text.trim()) pages.push(text.trim());
       }
       fullText = pages.join('\n\n');
-    } catch (primaryErr: any) {
-      console.warn('[FileParserService] Local PDF worker failed, trying CDN fallback:', primaryErr);
+    } catch (tier1Err: any) {
+      console.warn('[FileParserService] Tier 1 PDF.js worker failed, trying Tier 2 CDN worker:', tier1Err);
       try {
         const pdfjs = await import('pdfjs-dist');
         pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
         const loadingTask = pdfjs.getDocument({
           data: new Uint8Array(buffer),
           useSystemFonts: true,
+          isEvalSupported: false,
         });
         const pdf = await loadingTask.promise;
         const pages: string[] = [];
         for (let i = 1; i <= pdf.numPages; i++) {
           const page = await pdf.getPage(i);
           const textContent = await page.getTextContent();
-          pages.push(textContent.items.map((item: any) => item.str || '').join(' '));
+          const text = textContent.items.map((item: any) => item.str || '').join(' ');
+          if (text.trim()) pages.push(text.trim());
         }
         fullText = pages.join('\n\n');
-      } catch (fallbackErr: any) {
-        console.error('[FileParserService] PDF extraction failed completely:', fallbackErr);
-        throw new Error(
-          'Failed to extract text from the PDF document. Please make sure the PDF has selectable text (not scanned images), or upload as Excel (.xlsx, .xls) or CSV.'
-        );
+      } catch (tier2Err: any) {
+        console.warn('[FileParserService] Tier 2 CDN failed, activating Tier 3 raw PDF stream decoder:', tier2Err);
       }
     }
 
-    if (!fullText || fullText.trim().length < 10) {
+    // Tier 3: Direct Raw PDF Binary String & Stream Extraction Fallback
+    if (!fullText || fullText.trim().length < 15) {
+      try {
+        const bytes = new Uint8Array(buffer);
+        const latin1 = new TextDecoder('latin1').decode(bytes);
+
+        const extractedChunks: string[] = [];
+
+        // Match string literals in text blocks ( ... ) Tj or [ ... ] TJ
+        const stringLiteralRegex = /\(((?:[^()\\]|\\.)*)\)\s*(?:Tj|'|")/g;
+        let match: RegExpExecArray | null;
+        while ((match = stringLiteralRegex.exec(latin1)) !== null) {
+          const raw = match[1];
+          const unescaped = raw
+            .replace(/\\([()\\])/g, '$1')
+            .replace(/\\n/g, '\n')
+            .replace(/\\r/g, '\r')
+            .replace(/\\t/g, '\t');
+          if (unescaped.trim()) extractedChunks.push(unescaped.trim());
+        }
+
+        const arrayRegex = /\[((?:[^[\]]|\([^[\]]*\))*)\]\s*TJ/g;
+        while ((match = arrayRegex.exec(latin1)) !== null) {
+          const inner = match[1];
+          const innerMatches = inner.matchAll(/\(((?:[^()\\]|\\.)*)\)/g);
+          const segment: string[] = [];
+          for (const im of innerMatches) {
+            segment.push(im[1].replace(/\\([()\\])/g, '$1'));
+          }
+          if (segment.length > 0) {
+            extractedChunks.push(segment.join(' '));
+          }
+        }
+
+        if (extractedChunks.length > 0) {
+          fullText = extractedChunks.join('\n');
+        }
+      } catch (rawErr) {
+        console.error('[FileParserService] Raw stream extraction failed:', rawErr);
+      }
+    }
+
+    return fullText;
+  }
+
+  /**
+   * PDF text extractor for problem statements
+   * Recognizes structured problem statement blocks:
+   * e.g. "PS-01 — Title", "Problem 1: Title", "PS-01: Title", etc.
+   */
+  private static async extractProblemRowsFromPDF(
+    buffer: ArrayBuffer
+  ): Promise<Record<string, any>[]> {
+    const fullText = await this.extractTextFromPDFBuffer(buffer);
+
+    if (!fullText || fullText.trim().length < 5) {
       throw new Error(
-        'The uploaded PDF document contains no readable text. If this is a scanned document, please convert it to Excel or CSV before uploading.'
+        'The uploaded PDF document contains no readable text. If this is a scanned document, please convert it to Excel (.xlsx, .xls) or CSV before uploading.'
       );
     }
 
@@ -1140,75 +1193,54 @@ export class FileParserService {
     buffer: ArrayBuffer,
     _filename: string
   ): Promise<Record<string, any>[]> {
-    let fullText = '';
+    const fullText = await this.extractTextFromPDFBuffer(buffer);
 
-    try {
-      const pdfjs = await import('pdfjs-dist');
-      if (!pdfjs.GlobalWorkerOptions.workerSrc) {
-        pdfjs.GlobalWorkerOptions.workerSrc = typeof window !== 'undefined'
-          ? `${window.location.origin}/pdf.worker.min.js`
-          : 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-      }
-
-      const loadingTask = pdfjs.getDocument({
-        data: new Uint8Array(buffer),
-        useSystemFonts: true,
-      });
-      const pdf = await loadingTask.promise;
-      const pages: string[] = [];
-
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-        const text = textContent.items
-          .map((item: any) => item.str || '')
-          .join(' ');
-        pages.push(text);
-      }
-      fullText = pages.join('\n');
-    } catch (primaryErr: any) {
-      console.warn('[FileParserService] Participant PDF worker fallback:', primaryErr);
-      try {
-        const pdfjs = await import('pdfjs-dist');
-        pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-        const loadingTask = pdfjs.getDocument({
-          data: new Uint8Array(buffer),
-          useSystemFonts: true,
-        });
-        const pdf = await loadingTask.promise;
-        const pages: string[] = [];
-        for (let i = 1; i <= pdf.numPages; i++) {
-          const page = await pdf.getPage(i);
-          const textContent = await page.getTextContent();
-          pages.push(textContent.items.map((item: any) => item.str || '').join(' '));
-        }
-        fullText = pages.join('\n');
-      } catch (fallbackErr: any) {
-        throw new Error(
-          'Failed to extract participant text from PDF. Please upload roster as Excel (.xlsx, .xls) or CSV.'
-        );
-      }
+    if (!fullText || fullText.trim().length < 5) {
+      throw new Error(
+        'Failed to extract participant text from PDF. Please make sure the PDF contains selectable text or upload roster as Excel (.xlsx, .xls) or CSV.'
+      );
     }
 
     const candidateRows: Record<string, any>[] = [];
-    const lines = fullText.split(/[\r\n]+/).map((l) => l.trim()).filter((l) => l.length > 5);
+    const lines = fullText.split(/[\r\n]+/).map((l) => l.trim()).filter((l) => l.length > 3);
 
     for (const line of lines) {
       if (line.includes(',') || line.includes('\t') || line.includes('|')) {
-        const parts = line.split(/[,|\t]/).map((p) => p.trim());
-        if (parts.length >= 3) {
+        const parts = line.split(/[,|\t]/).map((p) => p.trim()).filter(Boolean);
+        if (parts.length >= 4) {
+          candidateRows.push({
+            'Team ID': parts[0],
+            'Team Name': parts[1],
+            'Team Lead Name': parts[2],
+            'Registration No.': parts[3],
+            Password: parts[3],
+            'Members': parts.slice(4).join(', ') || parts[2],
+          });
+        } else if (parts.length === 3) {
           candidateRows.push({
             'Team ID': parts[0],
             'Team Name': parts[1],
             'Registration No.': parts[2],
             Password: parts[2],
-            'Team Lead Name': parts[3] || 'Team Lead',
+            'Team Lead Name': parts[1],
           });
         } else if (parts.length === 2) {
           candidateRows.push({
+            'Team ID': parts[0],
             'Team Name': parts[0],
             'Registration No.': parts[1],
             Password: parts[1],
+          });
+        }
+      } else {
+        const spaceMatch = line.match(/^([a-zA-Z0-9_-]+)\s+(.*?)\s+(\d{6,15})\s*(.*)$/);
+        if (spaceMatch) {
+          candidateRows.push({
+            'Team ID': spaceMatch[1],
+            'Team Name': spaceMatch[2].trim(),
+            'Registration No.': spaceMatch[3].trim(),
+            Password: spaceMatch[3].trim(),
+            'Members': spaceMatch[4].trim() || spaceMatch[2].trim(),
           });
         }
       }

@@ -130,6 +130,32 @@ export class TeamService {
   }
 
   /**
+   * Clear all deleted tombstones across local storage and Firestore
+   */
+  public static async clearAllDeletedTombstones(): Promise<void> {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(DELETED_TEAMS_STORAGE_KEY);
+      }
+    } catch {
+      // ignore
+    }
+
+    if (isFirebaseConfigured && db) {
+      try {
+        const snap = await getDocs(collection(db, 'deletedTeams'));
+        const deletePromises: Promise<any>[] = [];
+        snap.forEach((d) => {
+          deletePromises.push(deleteDoc(d.ref));
+        });
+        await Promise.allSettled(deletePromises);
+      } catch (err) {
+        console.warn('[TeamService] Firestore clearAllDeletedTombstones error:', err);
+      }
+    }
+  }
+
+  /**
    * Remove deleted tombstone (e.g. when a team is re-imported or re-created)
    */
   public static async removeDeletedTeamId(teamId: string): Promise<void> {
@@ -157,6 +183,34 @@ export class TeamService {
       }
     }
   }
+
+  /**
+   * Reset and restore all 60 official Alpha teams (and clear deleted tombstones)
+   */
+  public static async resetToOfficialRoster(): Promise<TeamRecord[]> {
+    await this.clearAllDeletedTombstones();
+    this.saveLocalTeams(ALPHA_TEAMS_ROSTER);
+    this.saveLocalParticipants(ALPHA_TEAMS_ROSTER);
+
+    if (isFirebaseConfigured && db) {
+      try {
+        const promises: Promise<any>[] = [];
+        for (const t of ALPHA_TEAMS_ROSTER) {
+          promises.push(setDoc(doc(db, 'teams', t.teamId), t));
+          promises.push(setDoc(doc(db, 'participants', this.normalizeId(t.teamId)), t));
+        }
+        await Promise.allSettled(promises);
+      } catch (err) {
+        console.warn('[TeamService] Firestore resetToOfficialRoster error:', err);
+      }
+    }
+
+    return ALPHA_TEAMS_ROSTER;
+  }
+
+
+
+
 
   /**
    * Initialize and retrieve all active, non-deleted teams
