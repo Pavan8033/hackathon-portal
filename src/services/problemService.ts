@@ -67,6 +67,10 @@ export class ProblemService {
       this.saveLocalProblems(allProblems);
     }
 
+    allProblems.sort((a, b) =>
+      a.problemId.localeCompare(b.problemId, undefined, { numeric: true, sensitivity: 'base' })
+    );
+
     if (options.forParticipant) {
       // Participants can view PUBLISHED challenges, and can ALSO preview SCHEDULED challenges prior to selection unlock
       return allProblems.filter((p) => p.status === 'PUBLISHED' || p.status === 'SCHEDULED');

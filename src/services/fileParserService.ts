@@ -40,15 +40,38 @@ export class FileParserService {
         const k = String(cell || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
         if (
           k === 'teamid' ||
-          k === 'id' ||
+          k === 'teamcode' ||
+          k === 'teamno' ||
+          k === 'teamname' ||
+          k === 'teamlead' ||
+          k === 'teamleadname' ||
+          k === 'leadname' ||
+          k === 'leader' ||
+          k === 'regno' ||
+          k === 'registrationnumber' ||
+          k === 'usn' ||
+          k === 'rollno' ||
+          k === 'member' ||
+          k === 'members' ||
+          k === 'teammembers' ||
+          k === 'participant' ||
+          k === 'participants' ||
+          k === 'problemid' ||
+          k === 'problemtitle' ||
+          k === 'problemstatement' ||
+          k === 'title' ||
+          k === 'username' ||
+          k === 'password'
+        ) {
+          matchCount += 2;
+        } else if (
           k.includes('team') ||
           k.includes('lead') ||
           k.includes('reg') ||
           k.includes('member') ||
           k.includes('problem') ||
           k.includes('title') ||
-          k.includes('user') ||
-          k.includes('username')
+          k.includes('user')
         ) {
           matchCount++;
         }
@@ -60,9 +83,20 @@ export class FileParserService {
       }
     }
 
-    const headers = (rawMatrix[headerRowIndex] || []).map((h, colIdx) => {
+    const rawHeaders = (rawMatrix[headerRowIndex] || []).map((h, colIdx) => {
       const clean = String(h || '').trim();
       return clean || `col_${colIdx}`;
+    });
+
+    // Handle duplicate header names by appending column index
+    const seenHeaders = new Set<string>();
+    const headers = rawHeaders.map((h, colIdx) => {
+      let finalHeader = h;
+      if (seenHeaders.has(finalHeader.toLowerCase())) {
+        finalHeader = `${h}_${colIdx}`;
+      }
+      seenHeaders.add(finalHeader.toLowerCase());
+      return finalHeader;
     });
 
     const result: Record<string, any>[] = [];
@@ -88,7 +122,6 @@ export class FileParserService {
 
   // ==========================================================================
   // 1. PARTICIPANTS LIST PARSER (.xlsx, .xls, .csv, .pdf)
-  // Columns: Team ID (username), Team Name, Password, (Lead Name, Email, etc.)
   // ==========================================================================
   public static async parseParticipantFile(
     file: File,
@@ -139,7 +172,6 @@ export class FileParserService {
 
   // ==========================================================================
   // 2. PROBLEM STATEMENTS BULK PARSER (.xlsx, .xls, .csv, .pdf)
-  // Columns: Problem ID, Title, Description, Category, Difficulty, Tags, etc.
   // ==========================================================================
   public static async parseProblemFile(
     file: File,
@@ -211,7 +243,7 @@ export class FileParserService {
     const validCredentials: ParsedCredentialRow[] = [];
     const invalidCredentials: ParsedCredentialRow[] = [];
     const duplicateIds: string[] = [];
-    const seenIdsInFile = new Set<string>();
+    const seenCombos = new Set<string>();
 
     rows.forEach((row, idx) => {
       const rowNumber = idx + 2;
@@ -239,7 +271,7 @@ export class FileParserService {
         }
       }
 
-      // Positional fallback if headers were ambiguous and at least 2 non-empty values exist
+      // Positional fallback if headers were ambiguous
       if ((!teamId || !registrationNumber) && entries.length >= 2) {
         const nonNullEntries = entries.filter(([_, v]) => String(v ?? '').trim() !== '');
         if (nonNullEntries.length >= 2) {
@@ -269,14 +301,13 @@ export class FileParserService {
         errors.push(`Row ${rowNumber}: Missing Registration Number (Password)`);
       }
 
-      if (teamId) {
-        const normalizedId = teamId.toLowerCase();
-        if (seenIdsInFile.has(normalizedId)) {
-          errors.push(`Row ${rowNumber}: Duplicate Team ID "${teamId}" in uploaded file`);
-          duplicateIds.push(teamId);
-        } else {
-          seenIdsInFile.add(normalizedId);
-        }
+      // Check exact teamId + registrationNumber duplicates
+      const comboKey = `${teamId.toLowerCase()}___${registrationNumber.toLowerCase()}`;
+      if (teamId && registrationNumber && seenCombos.has(comboKey)) {
+        return; // Skip duplicate identical row silently
+      }
+      if (teamId && registrationNumber) {
+        seenCombos.add(comboKey);
       }
 
       const parsed: ParsedCredentialRow = {
@@ -314,7 +345,21 @@ export class FileParserService {
 
   private static isTeamIdKey(key: string): boolean {
     const k = key.toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (k.includes('lead') || k.includes('member') || k.includes('mail') || k.includes('phone') || k.includes('reg') || k.includes('roll')) {
+    if (
+      k.includes('lead') ||
+      k.includes('member') ||
+      k.includes('mail') ||
+      k.includes('phone') ||
+      k.includes('reg') ||
+      k.includes('roll') ||
+      k === 'slno' ||
+      k === 'sno' ||
+      k === 'srno' ||
+      k === 'serialno' ||
+      k === 'serialnumber' ||
+      k === 'row' ||
+      k === 'index'
+    ) {
       return false;
     }
     return (
@@ -328,20 +373,29 @@ export class FileParserService {
       k === 'user' ||
       k === 'loginid' ||
       k === 'teamidentifier' ||
-      k === 'slno' ||
-      k === 'sno'
+      k === 'team'
     );
   }
 
   private static isTeamNameKey(key: string): boolean {
     const k = key.toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (k.includes('lead') || k.includes('id') || k.includes('reg') || k.includes('roll') || k.includes('member') || k.includes('mail') || k.includes('phone')) {
+    if (
+      k.includes('lead') ||
+      k.includes('id') ||
+      k.includes('reg') ||
+      k.includes('roll') ||
+      k.includes('member') ||
+      k.includes('mail') ||
+      k.includes('phone') ||
+      k.includes('student') ||
+      k.includes('candidate') ||
+      k.includes('participant')
+    ) {
       return false;
     }
     return (
       k === 'teamname' ||
       k === 'team' ||
-      k === 'name' ||
       k === 'groupname' ||
       k === 'projectteam' ||
       k === 'projectname' ||
@@ -387,6 +441,13 @@ export class FileParserService {
       k === 'nameofteamleader' ||
       k === 'studentlead' ||
       k === 'leadstudent' ||
+      k === 'participantname' ||
+      k === 'studentname' ||
+      k === 'candidatename' ||
+      k === 'nameofparticipant' ||
+      k === 'nameofcandidate' ||
+      k === 'leadperson' ||
+      k === 'representative' ||
       k.includes('teamlead') ||
       k.includes('leadername') ||
       k.includes('leadname') ||
@@ -425,7 +486,6 @@ export class FileParserService {
       k.includes('contact') ||
       k.includes('reg') ||
       k.includes('roll') ||
-      k.includes('lead') ||
       k.includes('type') ||
       k.includes('track') ||
       k.includes('dept') ||
@@ -446,45 +506,56 @@ export class FileParserService {
       k === 'roster' ||
       k === 'students' ||
       k.startsWith('member') ||
-      k.startsWith('student')
+      k.startsWith('student') ||
+      k.startsWith('participant')
     );
   }
 
   private static isEmailKey(key: string): boolean {
+    const k = key.toLowerCase().replace(/[^a-z0-9]/g, '');
     return (
-      key === 'email' ||
-      key.includes('leademail') ||
-      key.includes('contactemail') ||
-      key === 'memberemail' ||
-      key === 'mail'
+      k === 'email' ||
+      k === 'emailid' ||
+      k === 'mail' ||
+      k === 'mailid' ||
+      k.includes('email') ||
+      k.includes('mail')
     );
   }
 
   private static isPhoneKey(key: string): boolean {
+    const k = key.toLowerCase().replace(/[^a-z0-9]/g, '');
     return (
-      key === 'phone' ||
-      key.includes('contact') ||
-      key.includes('mobile') ||
-      key === 'mobilenumber' ||
-      key === 'cell' ||
-      key === 'whatsapp'
+      k === 'phone' ||
+      k === 'phonenumber' ||
+      k.includes('contact') ||
+      k.includes('mobile') ||
+      k === 'mobilenumber' ||
+      k === 'cell' ||
+      k === 'whatsapp'
     );
   }
 
   private static isCollegeKey(key: string): boolean {
+    const k = key.toLowerCase().replace(/[^a-z0-9]/g, '');
     return (
-      key === 'college' ||
-      key === 'university' ||
-      key === 'institution' ||
-      key === 'institute' ||
-      key === 'department' ||
-      key === 'dept' ||
-      key === 'school'
+      k === 'college' ||
+      k === 'collegename' ||
+      k === 'university' ||
+      k === 'institution' ||
+      k === 'institutionname' ||
+      k === 'institute' ||
+      k === 'department' ||
+      k === 'dept' ||
+      k === 'school' ||
+      k === 'branch'
     );
   }
 
   /**
    * Validate and map raw imported participant rows
+   * Supports both single-row exports (with comma-separated or numbered member columns)
+   * AND multi-row exports (consecutive rows belonging to the same team).
    */
   private static validateAndNormalizeParticipantRows(
     rows: Record<string, any>[],
@@ -497,14 +568,92 @@ export class FileParserService {
     const seenIdsInFile = new Set<string>();
     const seenNamesInFile = new Set<string>();
 
-    // Check if the uploaded rows represent a multi-row export (e.g. one row per member with Member Type, etc.)
+    // 1. Detect if data represents multi-row export or contains duplicate team keys across rows
+    let hasMultiRows = false;
+    const teamIdCounts = new Map<string, number>();
+
+    for (const r of rows) {
+      let tId = '';
+      for (const [k, v] of Object.entries(r)) {
+        const nk = this.normalizeKey(k);
+        const val = String(v ?? '').trim();
+        if (val && this.isTeamIdKey(nk)) {
+          tId = val.toLowerCase();
+          break;
+        }
+      }
+      if (tId) {
+        teamIdCounts.set(tId, (teamIdCounts.get(tId) || 0) + 1);
+        if ((teamIdCounts.get(tId) || 0) > 1) {
+          hasMultiRows = true;
+        }
+      }
+    }
+
+    const isGarbageMember = (m: string) => {
+      const lm = m.toLowerCase().trim();
+      return (
+        !lm ||
+        /^\d+$/.test(lm) ||
+        lm === 'team lead' ||
+        lm === 'team lead name' ||
+        lm === 'lead' ||
+        lm === 'leader' ||
+        lm === 'members' ||
+        lm === 'member' ||
+        lm === 'participant institution' ||
+        lm === 'institution' ||
+        lm === 'college' ||
+        lm === 'university' ||
+        lm === 'participant' ||
+        lm === 'participants' ||
+        lm === 'student' ||
+        lm === 'students'
+      );
+    };
+
     const sampleKeys = rows.length > 0 ? Object.keys(rows[0]).map((k) => this.normalizeKey(k)) : [];
-    const isMultiRowExport = sampleKeys.includes('membertype') || sampleKeys.includes('membername');
+    const hasMultiRowHeaders = sampleKeys.some(
+      (k) =>
+        k === 'membertype' ||
+        k === 'membername' ||
+        k === 'studentname' ||
+        k === 'participantname' ||
+        k === 'candidatename' ||
+        k === 'role' ||
+        k.includes('memberreg') ||
+        k.includes('studentreg') ||
+        k.includes('memberemail')
+    );
 
-    let processedRows: Record<string, any>[] = rows;
+    const hasEmptyTeamIdWithMembers = rows.some((r) => {
+      let hasId = false;
+      let hasMember = false;
+      for (const [k, v] of Object.entries(r)) {
+        const nk = this.normalizeKey(k);
+        const val = String(v ?? '').trim();
+        if (!val) continue;
+        if (this.isTeamIdKey(nk) || this.isTeamNameKey(nk)) hasId = true;
+        if (
+          nk === 'studentname' ||
+          nk === 'membername' ||
+          nk === 'name' ||
+          nk === 'participantname' ||
+          this.isRegKey(nk)
+        ) {
+          hasMember = true;
+        }
+      }
+      return !hasId && hasMember;
+    });
 
-    if (isMultiRowExport) {
-      const teamGroups = new Map<string, {
+    const shouldGroupMultiRow = hasMultiRows || hasMultiRowHeaders || hasEmptyTeamIdWithMembers;
+
+    let processedRows: Record<string, any>[] = [];
+
+    if (shouldGroupMultiRow) {
+      // Intelligently group consecutive rows into unified team blocks
+      const teamGroups: {
         teamId: string;
         teamName: string;
         leadName: string;
@@ -514,7 +663,11 @@ export class FileParserService {
         phone: string;
         college: string;
         members: string[];
-      }>();
+      }[] = [];
+
+      let currentGroup: (typeof teamGroups)[0] | null = null;
+      let lastKnownTeamId = '';
+      let lastKnownTeamName = '';
 
       rows.forEach((r, idx) => {
         let tId = '';
@@ -529,13 +682,15 @@ export class FileParserService {
 
         for (const [k, v] of Object.entries(r)) {
           const nk = this.normalizeKey(k);
-          const val = String(v ?? '').trim();
+          let val = String(v ?? '').trim();
           if (!val) continue;
+
+          if (val.endsWith('.0') && /^\d+\.0$/.test(val)) val = val.slice(0, -2);
 
           if (this.isTeamIdKey(nk)) tId = val;
           else if (this.isTeamNameKey(nk)) tName = val;
-          else if (nk === 'membertype') mType = val.toLowerCase();
-          else if (nk === 'membername' || nk === 'studentname') mName = val;
+          else if (nk === 'membertype' || nk === 'role') mType = val.toLowerCase();
+          else if (nk === 'membername' || nk === 'studentname' || nk === 'participantname' || (nk === 'name' && !tName)) mName = val;
           else if (this.isRegKey(nk)) mReg = val;
           else if (this.isPasswordKey(nk)) mPass = val;
           else if (this.isEmailKey(nk)) mEmail = val;
@@ -543,11 +698,39 @@ export class FileParserService {
           else if (this.isCollegeKey(nk)) college = val;
         }
 
-        const groupKey = tId || tName || `row-${idx}`;
-        if (!teamGroups.has(groupKey)) {
-          teamGroups.set(groupKey, {
-            teamId: tId,
-            teamName: tName,
+        // Suppress title headers
+        if (
+          tId.toLowerCase() === 'team id' ||
+          tId.toLowerCase() === 'teamid' ||
+          (mName.toLowerCase() === 'member name' && tName.toLowerCase() === 'team name')
+        ) {
+          return;
+        }
+
+        // Handle merged cell / carry-forward
+        if (!tId && !tName && (mName || mReg) && currentGroup) {
+          tId = lastKnownTeamId;
+          tName = lastKnownTeamName;
+        } else if (tId) {
+          lastKnownTeamId = tId;
+          lastKnownTeamName = tName || lastKnownTeamName;
+        }
+
+        const normId = tId ? tId.toLowerCase() : '';
+        const normName = tName ? tName.toLowerCase() : '';
+
+        const existingGroup = teamGroups.find(
+          (g) =>
+            (normId && g.teamId.toLowerCase() === normId) ||
+            (normName && g.teamName && g.teamName.toLowerCase() === normName)
+        );
+
+        if (existingGroup) {
+          currentGroup = existingGroup;
+        } else if (tId || tName || mName) {
+          currentGroup = {
+            teamId: tId || (tName ? `TM-${String(teamGroups.length + 1).padStart(3, '0')}` : `TM-${String(idx + 1).padStart(3, '0')}`),
+            teamName: tName || (tId ? `Team ${tId}` : `Team ${teamGroups.length + 1}`),
             leadName: '',
             leadReg: '',
             password: '',
@@ -555,39 +738,60 @@ export class FileParserService {
             phone: '',
             college: '',
             members: [],
-          });
+          };
+          teamGroups.push(currentGroup);
         }
 
-        const group = teamGroups.get(groupKey)!;
-        if (tName && !group.teamName) group.teamName = tName;
-        if (tId && !group.teamId) group.teamId = tId;
+        if (!currentGroup) return;
 
-        const isLead = mType.includes('lead') || group.members.length === 0;
+        if (tName && (!currentGroup.teamName || currentGroup.teamName.startsWith('Team TM-'))) {
+          currentGroup.teamName = tName;
+        }
+        if (tId && (!currentGroup.teamId || currentGroup.teamId.startsWith('TM-'))) {
+          currentGroup.teamId = tId;
+        }
+
+        const isLead =
+          mType.includes('lead') ||
+          mType.includes('captain') ||
+          mType.includes('leader') ||
+          (!currentGroup.leadName && currentGroup.members.length === 0);
+
         if (isLead) {
-          if (!group.leadName && mName) group.leadName = mName;
-          if (!group.leadReg && mReg) group.leadReg = mReg;
-          if (!group.password && (mPass || mReg)) group.password = mPass || mReg;
-          if (!group.email && mEmail) group.email = mEmail;
-          if (!group.phone && mPhone) group.phone = mPhone;
-          if (!group.college && college) group.college = college;
+          if (!currentGroup.leadName && mName) currentGroup.leadName = mName;
+          if (!currentGroup.leadReg && mReg) currentGroup.leadReg = mReg;
+          if (!currentGroup.password && (mPass || mReg)) currentGroup.password = mPass || mReg;
+          if (!currentGroup.email && mEmail) currentGroup.email = mEmail;
+          if (!currentGroup.phone && mPhone) currentGroup.phone = mPhone;
+          if (!currentGroup.college && college) currentGroup.college = college;
         }
 
-        if (mName && !group.members.includes(mName)) {
-          group.members.push(mName);
+        if (mName && !currentGroup.members.some((m) => m.toLowerCase() === mName.toLowerCase())) {
+          currentGroup.members.push(mName);
         }
       });
 
-      processedRows = Array.from(teamGroups.values()).map((g) => ({
-        'Team ID': g.teamId,
-        'Team Name': g.teamName,
-        'Team Lead': g.leadName || (g.members[0] || 'Team Lead'),
-        'Registration No.': g.leadReg,
-        'Password': g.password || g.leadReg,
-        'Members': g.members.join(', '),
-        'Email': g.email,
-        'Phone': g.phone,
-        'College': g.college,
-      }));
+      processedRows = teamGroups.map((g) => {
+        const lead = g.leadName || g.members[0] || '';
+        const cleanMems = g.members.filter((m) => !isGarbageMember(m));
+        if (lead && !cleanMems.some((m) => m.toLowerCase() === lead.toLowerCase())) {
+          cleanMems.unshift(lead);
+        }
+
+        return {
+          'Team ID': g.teamId,
+          'Team Name': g.teamName,
+          'Team Lead': lead,
+          'Registration No.': g.leadReg,
+          'Password': g.password || g.leadReg,
+          'Members': cleanMems.join(', '),
+          'Email': g.email,
+          'Phone': g.phone,
+          'College': g.college,
+        };
+      });
+    } else {
+      processedRows = rows;
     }
 
     processedRows.forEach((row, idx) => {
@@ -604,12 +808,14 @@ export class FileParserService {
       let college = '';
       const members: string[] = [];
 
+      // Collect potential member columns
+      const memberColMap = new Map<number, string>();
+
       for (const [rawKey, rawVal] of Object.entries(row)) {
         const key = this.normalizeKey(rawKey);
         let val = String(rawVal ?? '').trim();
         if (!val) continue;
 
-        // Strip trailing .0 if parsed as float from Excel
         if (val.endsWith('.0') && /^\d+\.0$/.test(val)) {
           val = val.slice(0, -2);
         }
@@ -623,16 +829,42 @@ export class FileParserService {
         } else if (this.isTeamLeadKey(key)) {
           teamLeadName = val;
         } else if (this.isRegKey(key)) {
-          teamLeadReg = val;
+          // If key is member-specific (e.g. member2regno), don't overwrite lead reg
+          if (!key.startsWith('member') && !key.startsWith('student') && !key.startsWith('participant')) {
+            teamLeadReg = val;
+          } else if (!teamLeadReg) {
+            teamLeadReg = val;
+          }
         } else if (this.isEmailKey(key)) {
-          email = val;
+          if (!key.startsWith('member') && !email) {
+            email = val;
+          } else if (!email) {
+            email = val;
+          }
         } else if (this.isPhoneKey(key)) {
-          phone = val;
+          if (!phone) phone = val;
         } else if (this.isCollegeKey(key)) {
-          college = val;
+          if (!college) college = val;
         } else if (this.isMembersKey(key)) {
-          const splitMembers = val.split(/[,;\n]/).map((m) => m.trim()).filter(Boolean);
-          members.push(...splitMembers);
+          // Check if key has a specific number like member1, member2
+          const numMatch = key.match(/\d+/);
+          if (numMatch) {
+            memberColMap.set(parseInt(numMatch[0], 10), val);
+          } else {
+            const splitMembers = val.split(/[,;\n|/]/).map((m) => m.trim()).filter(Boolean);
+            members.push(...splitMembers);
+          }
+        }
+      }
+
+      // Add ordered member columns
+      if (memberColMap.size > 0) {
+        const sortedNums = Array.from(memberColMap.keys()).sort((a, b) => a - b);
+        for (const num of sortedNums) {
+          const mVal = memberColMap.get(num)!;
+          if (mVal && !members.includes(mVal)) {
+            members.push(mVal);
+          }
         }
       }
 
@@ -646,7 +878,6 @@ export class FileParserService {
         return;
       }
 
-      // If teamId is missing, auto-fallback to teamName or generated ID
       // Skip completely empty row in Excel
       if (!teamId && !teamName && !teamLeadName && members.length === 0 && !teamLeadReg && !password) {
         return;
@@ -662,7 +893,6 @@ export class FileParserService {
       }
 
       // Credential resolution:
-      // Guarantee password is valid by falling back through Registration No., Team ID, or generated default
       password = (
         password ||
         teamLeadReg ||
@@ -671,11 +901,6 @@ export class FileParserService {
       ).trim();
 
       teamLeadReg = (teamLeadReg || password || teamId).trim();
-
-      // Validation
-      if (!teamId && !teamName) {
-        errors.push(`Row ${rowNumber}: Missing Team ID and Team Name`);
-      }
 
       // Clean up teamLeadName if it's the title itself
       if (
@@ -689,25 +914,19 @@ export class FileParserService {
 
       // If teamLeadName is empty, check if members has real names
       if (!teamLeadName) {
-        const realMember = members.find((m) => m && !/^\d+$/.test(m) && m.toLowerCase() !== 'team lead');
+        const realMember = members.find((m) => !isGarbageMember(m));
         if (realMember) {
           teamLeadName = realMember;
         } else {
           teamLeadName =
             teamName && !teamName.toLowerCase().startsWith('team tm-') && !teamName.toLowerCase().startsWith('team alpha-')
               ? `${teamName} Lead`
-              : '';
+              : `Lead ${teamId}`;
         }
       }
 
       // Clean up members array: filter out placeholder titles or pure digit member counts
-      const cleanMembers = members.filter(
-        (m) =>
-          m &&
-          m.toLowerCase() !== 'team lead' &&
-          m.toLowerCase() !== 'members' &&
-          m.toLowerCase() !== 'participant institution'
-      );
+      const cleanMembers = members.filter((m) => !isGarbageMember(m));
       if (cleanMembers.length === 0 && teamLeadName) {
         cleanMembers.push(teamLeadName);
       } else if (teamLeadName && !cleanMembers.some((m) => m.toLowerCase() === teamLeadName.toLowerCase())) {
@@ -746,7 +965,7 @@ export class FileParserService {
         members: cleanMembers,
         email: email || `${teamId.toLowerCase().replace(/[^a-z0-9]/g, '')}@hackathon.local`,
         phone: phone || '+91 90000 00000',
-        college: college || 'Participant Institution',
+        college: college && college.toLowerCase() !== 'participant institution' ? college : 'Participant Institution',
         isValid: errors.length === 0,
         errors,
       };
@@ -757,6 +976,11 @@ export class FileParserService {
         invalidTeams.push(parsedRow);
       }
     });
+
+    // Natural sort validTeams by teamId so order is crisp and predictable
+    validTeams.sort((a, b) =>
+      a.teamId.localeCompare(b.teamId, undefined, { numeric: true, sensitivity: 'base' })
+    );
 
     return {
       totalRows: processedRows.length,
@@ -948,6 +1172,11 @@ export class FileParserService {
       }
     });
 
+    // Natural sort problems by problemId
+    validProblems.sort((a, b) =>
+      a.problemId.localeCompare(b.problemId, undefined, { numeric: true, sensitivity: 'base' })
+    );
+
     return {
       totalRows: rows.length,
       validCount: validProblems.length,
@@ -961,12 +1190,13 @@ export class FileParserService {
 
   /**
    * Universal, resilient PDF text extractor
-   * Uses pdfjs-dist with multi-tier worker fallback, followed by raw stream binary text scanning
+   * Uses pdfjs-dist with multi-tier worker fallback and visual line-coordinate awareness.
+   * Preserves exact line breaks (\n) and paragraph gaps (\n\n) so multi-problem pages parse flawlessly!
    */
   public static async extractTextFromPDFBuffer(buffer: ArrayBuffer): Promise<string> {
     let fullText = '';
 
-    // Tier 1: Try PDF.js with local worker
+    // Tier 1: Try PDF.js with local / CDN worker
     try {
       const pdfjs = await import('pdfjs-dist');
       if (typeof window !== 'undefined') {
@@ -986,10 +1216,22 @@ export class FileParserService {
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
         const textContent = await page.getTextContent();
-        const text = textContent.items
-          .map((item: any) => item.str || '')
-          .join(' ');
-        if (text.trim()) pages.push(text.trim());
+        const lines: string[] = [];
+        let currentLine = '';
+        let lastY: number | null = null;
+
+        for (const item of textContent.items as any[]) {
+          const y = item.transform ? Math.round(item.transform[5]) : null;
+          if (lastY !== null && y !== null && Math.abs(y - lastY) > 3) {
+            if (currentLine.trim()) lines.push(currentLine.trim());
+            currentLine = item.str || '';
+          } else {
+            currentLine += (currentLine ? ' ' : '') + (item.str || '');
+          }
+          lastY = y;
+        }
+        if (currentLine.trim()) lines.push(currentLine.trim());
+        if (lines.length > 0) pages.push(lines.join('\n'));
       }
       fullText = pages.join('\n\n');
     } catch (tier1Err: any) {
@@ -1007,8 +1249,21 @@ export class FileParserService {
         for (let i = 1; i <= pdf.numPages; i++) {
           const page = await pdf.getPage(i);
           const textContent = await page.getTextContent();
-          const text = textContent.items.map((item: any) => item.str || '').join(' ');
-          if (text.trim()) pages.push(text.trim());
+          const lines: string[] = [];
+          let currentLine = '';
+          let lastY: number | null = null;
+          for (const item of textContent.items as any[]) {
+            const y = item.transform ? Math.round(item.transform[5]) : null;
+            if (lastY !== null && y !== null && Math.abs(y - lastY) > 3) {
+              if (currentLine.trim()) lines.push(currentLine.trim());
+              currentLine = item.str || '';
+            } else {
+              currentLine += (currentLine ? ' ' : '') + (item.str || '');
+            }
+            lastY = y;
+          }
+          if (currentLine.trim()) lines.push(currentLine.trim());
+          if (lines.length > 0) pages.push(lines.join('\n'));
         }
         fullText = pages.join('\n\n');
       } catch (tier2Err: any) {
@@ -1023,8 +1278,6 @@ export class FileParserService {
         const latin1 = new TextDecoder('latin1').decode(bytes);
 
         const extractedChunks: string[] = [];
-
-        // Match string literals in text blocks ( ... ) Tj or [ ... ] TJ
         const stringLiteralRegex = /\(((?:[^()\\]|\\.)*)\)\s*(?:Tj|'|")/g;
         let match: RegExpExecArray | null;
         while ((match = stringLiteralRegex.exec(latin1)) !== null) {
@@ -1063,8 +1316,8 @@ export class FileParserService {
 
   /**
    * PDF text extractor for problem statements
-   * Recognizes structured problem statement blocks:
-   * e.g. "PS-01 — Title", "Problem 1: Title", "PS-01: Title", etc.
+   * Recognizes all structured problem statement blocks:
+   * e.g. "PS-01 — Title", "WEB-PS-001 Title", "Problem 1: Title", "Challenge 1 - Title", "1. Title", etc.
    */
   private static async extractProblemRowsFromPDF(
     buffer: ArrayBuffer
@@ -1080,14 +1333,14 @@ export class FileParserService {
     const rows: Record<string, any>[] = [];
     const normalizedText = fullText.replace(/\r\n/g, '\n');
 
-    // Split on headers such as "PS-01 — Title", "PS-01: Title", "Problem 1: Title", "Challenge 1 - Title"
-    const headerRegex = /(?:^|\n|\s{2,})(PS[-_\s]*\d+|Problem\s*(?:Statement)?\s*[-#:]?\s*\d+|Challenge\s*[-#:]?\s*\d+)\s*[-—–:]\s*/gi;
+    // Split on headers such as "PS-01", "WEB-PS-001", "Problem 1", "Challenge 1", "Track 1", "1. Title"
+    const headerRegex = /(?:^|\n)\s*([A-Za-z0-9_-]*\b(?:PS|PRB|PROB|PROBLEM(?:\s*STATEMENT)?|CHALLENGE|TRACK|WEB[-_]PS|APP[-_]PS)[-_#.:\s]*\d+|\b\d{1,3}\s*[\.\)]\s*(?=[A-Z]))\s*[-—–:.]*\s*/gim;
 
-    const matches: { idStr: string; index: number; fullMatch: string }[] = [];
+    const matches: { rawId: string; index: number; fullMatch: string }[] = [];
     let m: RegExpExecArray | null;
     while ((m = headerRegex.exec(normalizedText)) !== null) {
       matches.push({
-        idStr: m[1],
+        rawId: m[1],
         index: m.index,
         fullMatch: m[0],
       });
@@ -1099,23 +1352,69 @@ export class FileParserService {
         const next = matches[i + 1];
         const chunk = normalizedText.slice(cur.index, next ? next.index : undefined).trim();
 
-        const psIdMatch = chunk.match(/^(?:PS[-_\s]*(\d+)|Problem\s*(?:Statement)?\s*(\d+)|Challenge\s*(\d+))\s*[-—–:]\s*/i);
-        const num = psIdMatch ? (psIdMatch[1] || psIdMatch[2] || psIdMatch[3]) : String(i + 1);
-        const cleanId = 'PS-' + num.padStart(2, '0');
+        // 1. Clean ID
+        let cleanId = cur.rawId.trim().toUpperCase().replace(/[\.\)]$/, '');
+        const numMatch = cleanId.match(/(\d+)/);
+        const digits = numMatch ? numMatch[1] : String(i + 1);
 
-        const contentAfterId = chunk.replace(/^(?:PS[-_\s]*\d+|Problem\s*(?:Statement)?\s*\d+|Challenge\s*\d+)\s*[-—–:]\s*/i, '');
+        if (!cleanId.startsWith('WEB-') && !cleanId.startsWith('APP-') && !cleanId.startsWith('PRB-')) {
+          cleanId = 'PS-' + digits.padStart(2, '0');
+        }
+
+        // 2. Separate Header Line and Remaining Body
+        const firstLineBreak = chunk.indexOf('\n');
+        const headerLine = firstLineBreak >= 0 ? chunk.slice(0, firstLineBreak) : chunk;
+        const rest = firstLineBreak >= 0 ? chunk.slice(firstLineBreak + 1).trim() : '';
 
         // Extract Title
-        const titleMatch = contentAfterId.match(/^(.*?)(?=\s*Category:|\s*Difficulty:|\s*Problem Description|\s*Description:|\s*Track:|$)/is);
-        let title = titleMatch ? titleMatch[1].trim() : `Problem ${cleanId}`;
-        title = title.replace(/[-—–:]\s*$/, '').trim();
+        let title = headerLine.replace(/^[A-Za-z0-9_#.:\s-]+[-—–:.]\s*/, '').trim();
+        const restLines = rest.split('\n').map((l) => l.trim()).filter(Boolean);
 
-        // Extract Category
-        const catMatch = contentAfterId.match(/(?:Category|Domain|Track|Theme)[:\s]+(.*?)(?=\s*Difficulty:|\s*Level:|\s*Problem Description|\s*Description:|$)/is);
-        const category = catMatch ? catMatch[1].trim() : 'General Innovation';
+        // If title is missing or short, check if subsequent line(s) form the full title
+        if (!title || title.toUpperCase() === cleanId || title.length < 4) {
+          if (
+            restLines.length > 0 &&
+            !restLines[0].toLowerCase().startsWith('category') &&
+            !restLines[0].toLowerCase().startsWith('difficulty') &&
+            !restLines[0].toLowerCase().startsWith('problem description') &&
+            !restLines[0].toLowerCase().startsWith('description') &&
+            !restLines[0].toLowerCase().startsWith('domain')
+          ) {
+            title = restLines[0];
+          } else {
+            title = `Problem ${cleanId}`;
+          }
+        } else if (
+          restLines.length > 0 &&
+          !restLines[0].toLowerCase().startsWith('category') &&
+          !restLines[0].toLowerCase().startsWith('difficulty') &&
+          !restLines[0].toLowerCase().startsWith('problem description') &&
+          !restLines[0].toLowerCase().startsWith('description') &&
+          !restLines[0].toLowerCase().startsWith('domain') &&
+          restLines[0].length < 60 &&
+          !restLines[0].endsWith('.')
+        ) {
+          // Wrapped title line in table cell (e.g. "CAREERGRAPH — AI-Powered" + "Skill-Gap & Career Intelligence")
+          title = `${title} ${restLines[0]}`.trim();
+        }
 
-        // Extract Difficulty
-        const diffMatch = contentAfterId.match(/(?:Difficulty|Level|Complexity)[:\s]+(.*?)(?=\s*Problem Description|\s*Description:|\s*Suggested Evaluation Focus:|\s*Evaluation:|$)/is);
+        // Clean up title noise
+        title = title
+          .replace(/^[-—–:]\s*/, '')
+          .replace(/[-—–:]\s*$/, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        // 3. Category
+        const catMatch = chunk.match(/(?:Category|Domain|Track|Theme|Field)[:\s]+(.*?)(?=\s*Difficulty:|\s*Level:|\s*Problem Description|\s*Description:|\s*Expected|\s*Evaluation:|\n|$)/is);
+        let category = catMatch ? catMatch[1].trim() : 'General Innovation';
+        if (category.toLowerCase().includes('difficulty:')) {
+          category = category.split(/difficulty:/i)[0].trim();
+        }
+        category = category.replace(/[-—–:]\s*$/, '').trim() || 'General Innovation';
+
+        // 4. Difficulty
+        const diffMatch = chunk.match(/(?:Difficulty|Level|Complexity)[:\s]+(.*?)(?=\s*Category:|\s*Problem Description|\s*Description:|\s*Suggested|\s*Evaluation:|\n|$)/is);
         let difficulty: ProblemDifficulty = 'Intermediate';
         if (diffMatch) {
           const d = diffMatch[1].trim().toLowerCase();
@@ -1124,20 +1423,44 @@ export class FileParserService {
           else difficulty = 'Intermediate';
         }
 
-        // Extract Description
-        const descMatch = contentAfterId.match(/(?:Problem Description|Description)[:\s]*(.*?)(?=\s*(?:Suggested Evaluation Focus|Evaluation Criteria|Evaluation|Constraints|Deliverables):|$)/is);
+        // 5. Description
+        const descMatch = chunk.match(/(?:Problem Description|Description|Overview|Details|Problem Summary|Scope)[:\s]*([\s\S]*?)(?=(?:Suggested Evaluation|Evaluation Criteria|Evaluation|Deliverables|Expected Deliverables|Expected Solution|Constraints|Tech Stack|Technologies|Notes|$))/i);
         let desc = descMatch ? descMatch[1].trim() : '';
         if (!desc) {
-          desc = contentAfterId
+          desc = rest
             .replace(title, '')
-            .replace(/(?:Category|Domain|Track)[:\s]+[^\n]+/i, '')
-            .replace(/(?:Difficulty|Level)[:\s]+[^\n]+/i, '')
+            .replace(/(?:Category|Domain|Track|Difficulty|Level)[:\s]+[^\n]+/gi, '')
+            .replace(/^(?:Problem Description|Description|Overview|Details)[:\s]*/gim, '')
+            .replace(/Hackathon Problem Statement Testing Dataset\s+Page\s+\d+/gi, '')
+            .replace(/Problem Statements – Master List/gi, '')
+            .replace(/Total Problems:\s*\d+/gi, '')
+            .replace(/Problem ID\s+Title\s+Description\s+Category.*/gi, '')
             .trim();
         }
 
-        // Extract Evaluation Criteria
-        const evalMatch = contentAfterId.match(/(?:Suggested Evaluation Focus|Evaluation Criteria|Evaluation Focus|Criteria)[:\s]+(.*?)$/is);
+        // Clean noise from desc
+        desc = desc
+          .replace(/Hackathon Problem Statement Testing Dataset\s+Page\s+\d+/gi, '')
+          .replace(/Problem Statements – Master List/gi, '')
+          .replace(/Total Problems:\s*\d+/gi, '')
+          .replace(/Problem ID\s+Title\s+Description\s+Category.*/gi, '')
+          .trim();
+
+        // 6. Expected Solution
+        const solMatch = chunk.match(/(?:Expected Solution|Deliverables|Expected Deliverables|Expected Outcome|Outcomes|Output)[:\s]+([\s\S]*?)(?=(?:Suggested Evaluation|Evaluation Criteria|Evaluation|Constraints|Tech Stack|Technologies|Notes|$))/i);
+        const expectedSolution = solMatch ? solMatch[1].trim() : '';
+
+        // 7. Evaluation Criteria
+        const evalMatch = chunk.match(/(?:Suggested Evaluation Focus|Evaluation Criteria|Evaluation Focus|Evaluation|Rubric|Criteria)[:\s]+([\s\S]*?)(?=(?:Constraints|Tech Stack|Technologies|Notes|$))/i);
         const evaluationCriteria = evalMatch ? evalMatch[1].trim() : '';
+
+        // 8. Tech Stack
+        const techMatch = chunk.match(/(?:Technologies|Tech Stack|Tools|Key Technologies|Skills)[:\s]+([^\n]+)/i);
+        const technologies = techMatch ? techMatch[1].split(/[,;\n]/).map((t) => t.trim()).filter(Boolean) : [];
+
+        // 9. Constraints
+        const constMatch = chunk.match(/(?:Constraints|Rules|Restrictions|Limitations)[:\s]+([^\n]+)/i);
+        const constraints = constMatch ? constMatch[1].trim() : '';
 
         if (title && (desc || title.length > 5)) {
           rows.push({
@@ -1146,7 +1469,10 @@ export class FileParserService {
             Category: category,
             Difficulty: difficulty,
             Description: desc || title,
+            'Expected Solution': expectedSolution,
             'Evaluation Criteria': evaluationCriteria,
+            Technologies: technologies.join(', '),
+            Constraints: constraints,
           });
         }
       }
@@ -1163,8 +1489,8 @@ export class FileParserService {
         if (lines.length === 0) continue;
 
         const firstLine = lines[0];
-        let title = firstLine.slice(0, 100);
-        let desc = lines.slice(1).join(' ') || para;
+        const title = firstLine.slice(0, 120);
+        const desc = lines.slice(1).join('\n') || para;
         let category = 'General Innovation';
 
         const catMatch = para.match(/(?:category|domain|track|theme)[:\s]+([^\n.,;]+)/i);
@@ -1249,4 +1575,5 @@ export class FileParserService {
     return candidateRows;
   }
 }
+
 

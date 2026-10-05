@@ -391,6 +391,10 @@ export class TeamService {
       return team;
     });
 
+    finalList.sort((a, b) =>
+      a.teamId.localeCompare(b.teamId, undefined, { numeric: true, sensitivity: 'base' })
+    );
+
     this.saveLocalTeams(finalList);
     return finalList;
   }
