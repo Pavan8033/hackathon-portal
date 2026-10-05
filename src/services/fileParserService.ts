@@ -933,6 +933,20 @@ export class FileParserService {
         cleanMembers.unshift(teamLeadName);
       }
 
+      const cleanQuotes = (s?: string) => {
+        if (!s) return '';
+        return s.replace(/^["'`\\]+|["'`\\]+$/g, '').trim();
+      };
+
+      teamId = cleanQuotes(teamId);
+      teamName = cleanQuotes(teamName);
+      teamLeadName = cleanQuotes(teamLeadName);
+      teamLeadReg = cleanQuotes(teamLeadReg);
+      password = cleanQuotes(password);
+      email = cleanQuotes(email);
+      phone = cleanQuotes(phone);
+      college = cleanQuotes(college);
+
       // Check duplicates within the uploaded file
       const normalizedId = teamId.toLowerCase();
       const normalizedName = teamName.toLowerCase();
@@ -962,7 +976,7 @@ export class FileParserService {
         teamLeadName,
         teamLeadRegistrationNumber: teamLeadReg,
         password,
-        members: cleanMembers,
+        members: cleanMembers.map((m) => cleanQuotes(m)),
         email: email || `${teamId.toLowerCase().replace(/[^a-z0-9]/g, '')}@hackathon.local`,
         phone: phone || '+91 90000 00000',
         college: college && college.toLowerCase() !== 'participant institution' ? college : 'Participant Institution',

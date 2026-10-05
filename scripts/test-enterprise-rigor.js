@@ -569,9 +569,30 @@ function validateAndNormalizeParticipantRows(rows) {
       else teamLeadName = teamName && !teamName.toLowerCase().startsWith('team tm-') ? `${teamName} Lead` : `Lead ${teamId}`;
     }
 
-    const cleanMembers = members.filter(m => !isGarbageMember(m));
-    if (cleanMembers.length === 0 && teamLeadName) cleanMembers.push(teamLeadName);
-    else if (teamLeadName && !cleanMembers.some(m => m.toLowerCase() === teamLeadName.toLowerCase())) cleanMembers.unshift(teamLeadName);
+    const cleanQuotes = (s) => {
+      if (!s) return '';
+      return String(s).replace(/^["'`\\]+|["'`\\]+$/g, '').trim();
+    };
+
+    teamId = cleanQuotes(teamId);
+    teamName = cleanQuotes(teamName);
+    teamLeadName = cleanQuotes(teamLeadName);
+    teamLeadReg = cleanQuotes(teamLeadReg);
+    password = cleanQuotes(password);
+    email = cleanQuotes(email);
+    phone = cleanQuotes(phone);
+    college = cleanQuotes(college);
+
+    const cleanMembers = members
+      .filter(m => !isGarbageMember(m))
+      .map(m => cleanQuotes(m))
+      .filter(Boolean);
+
+    if (cleanMembers.length === 0 && teamLeadName) {
+      cleanMembers.push(teamLeadName);
+    } else if (teamLeadName && !cleanMembers.some(m => m.toLowerCase() === teamLeadName.toLowerCase())) {
+      cleanMembers.unshift(teamLeadName);
+    }
 
     normalized.push({
       teamId,
@@ -969,6 +990,28 @@ async function runTestSuite() {
   assert(normalizedNumbered[0].teamLeadName === 'Kiran Rao', 'Lead name correctly preserved');
   assert(normalizedNumbered[0].teamLeadRegistrationNumber === '9924001', 'Lead Reg No is NOT overwritten by member 1/2 Reg No');
   assert(normalizedNumbered[0].teamMembers.length === 3, 'All 3 members (Kiran, Ravi, Pooja) included in roster');
+
+  // Case D: Full 60-Team Export & 5-Columns Integrity
+  const exportFilePath = 'C:/Users/dpava/Downloads/ALPHA_Teams_Export_2026-09-23(1).xls';
+  if (fs.existsSync(exportFilePath)) {
+    const buf = fs.readFileSync(exportFilePath);
+    const wb = XLSX.read(buf, { type: 'buffer' });
+    const rawRows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+    const normalized60 = validateAndNormalizeParticipantRows(rawRows);
+    assert(normalized60.length === 60, `Normalized exactly 60/60 teams from export file (got ${normalized60.length})`);
+    
+    const store60 = new MockTeamStore();
+    await store60.importTeams(normalized60);
+    assert(store60.teams.size === 60, `Imported exactly 60/60 teams without missing or swallowing any team (got ${store60.teams.size})`);
+    
+    // Verify specific teams
+    const alpha001 = store60.getTeamById('ALPHA-001');
+    assert(alpha001 !== null && alpha001.teamName === 'INNOVATES', 'ALPHA-001 (INNOVATES) present');
+    const alpha023 = store60.getTeamById('ALPHA-023');
+    assert(alpha023 !== null && alpha023.teamName.includes('DIGITAL DOMINATORS'), 'ALPHA-023 (DIGITAL DOMINATORS) present with quotes sanitized');
+    const alpha060 = store60.getTeamById('ALPHA-060');
+    assert(alpha060 !== null && alpha060.teamName === 'DETA', 'ALPHA-060 (DETA) present');
+  }
 
   // ===============================================================
   // 4. PDF PROBLEM STATEMENTS EXTRACTION AUDIT

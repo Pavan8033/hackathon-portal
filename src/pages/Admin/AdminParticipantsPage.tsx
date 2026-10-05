@@ -11,13 +11,13 @@ import {
   Clock,
   X,
   Eye,
-  RotateCcw,
   UserX,
   UserCheck,
   Trash2,
   FileSpreadsheet,
   Download,
   ExternalLink,
+  RotateCcw,
 } from 'lucide-react';
 import { AdminLayout } from '../../components/layout/AdminLayout';
 import { Button } from '../../components/ui/Button';
@@ -247,22 +247,6 @@ export const AdminParticipantsPage: React.FC = () => {
     document.body.removeChild(link);
   };
 
-  const handleResetRoster = async () => {
-    if (!window.confirm('Restore all 60 official participant teams and clear any deleted tombstones?')) {
-      return;
-    }
-    setIsLoading(true);
-    try {
-      await TeamService.resetToOfficialRoster();
-      showToast('Official 60-team directory restored successfully.', 'success', 'Roster Restored');
-      await loadTeams();
-    } catch (err: any) {
-      showToast(err?.message || 'Failed to restore roster.', 'error', 'Error');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   // -------------------------------------------------------------
   // Live Team Calculations
   // -------------------------------------------------------------
@@ -297,16 +281,6 @@ export const AdminParticipantsPage: React.FC = () => {
       description="Import, inspect, and manage registered hackathon teams (any custom format or official roster) and their live challenge allocations."
       actionButton={
         <div className="flex flex-wrap items-center gap-2.5">
-          <Button
-            variant="secondary"
-            size="md"
-            leftIcon={<RotateCcw className="w-4 h-4 text-[#164A36]" />}
-            onClick={handleResetRoster}
-            className="bg-white border-[#D5E6DB] text-[#164A36] hover:bg-[#EEF5F0]"
-            title="Restore default 60 Alpha teams and clear deleted tombstones"
-          >
-            RESTORE DEFAULT (60)
-          </Button>
           <Button
             variant="secondary"
             size="md"

@@ -524,71 +524,103 @@ export class TeamService {
   public static async importTeams(
     rows: ParsedTeamRow[]
   ): Promise<{ importedCount: number; updatedCount: number; skippedCount: number; errors: string[] }> {
+    // Clear any deleted tombstones upfront so re-imported teams are fully available
+    await Promise.allSettled(rows.map((r) => this.removeDeletedTeamId(r.teamId)));
+
     const existing = await this.getAllTeams();
     const newRecords: TeamRecord[] = [];
     const timestamp = new Date().toISOString();
     const errors: string[] = [];
     let updatedCount = 0;
 
+    const cleanQuotes = (s?: string) => {
+      if (!s) return '';
+      return s.replace(/^["'`\\]+|["'`\\]+$/g, '').trim();
+    };
+
     for (const r of rows) {
-      const customId = this.normalizeId(r.teamId);
+      const sanitizedId = cleanQuotes(r.teamId);
+      const customId = this.normalizeId(sanitizedId);
       if (!customId) continue;
-      await this.removeDeletedTeamId(r.teamId);
+      await this.removeDeletedTeamId(sanitizedId);
 
-      // Filter out title/header row if included in data
-      const isHeaderRow =
-        customId === 'teamid' ||
-        (r.teamLeadName?.toLowerCase() === 'team lead' && r.teamName?.toLowerCase() === 'team name');
-      if (isHeaderRow) continue;
+      // Check if team already exists by normalized teamId (or by unique non-generic teamName if no teamId)
+      const sanitizedName = cleanQuotes(r.teamName);
+      const normalizedName = this.normalizeId(sanitizedName);
+      const existingIndex = existing.findIndex((t) => {
+        if (this.normalizeId(t.teamId) === customId) return true;
+        if (
+          !sanitizedId &&
+          normalizedName &&
+          !this.isGenericTeamName(sanitizedName, sanitizedId) &&
+          !this.isGenericTeamName(t.teamName, t.teamId)
+        ) {
+          return this.normalizeId(t.teamName) === normalizedName;
+        }
+        return false;
+      });
 
-      // Check if team already exists by normalized teamId or teamName -> MERGE with all participant details!
-      const normalizedName = this.normalizeId(r.teamName);
-      const existingIndex = existing.findIndex(
-        (t) =>
-          this.normalizeId(t.teamId) === customId ||
-          (normalizedName && this.normalizeId(t.teamName) === normalizedName)
-      );
+      const secretPassword = (
+        r.password ||
+        r.teamLeadRegistrationNumber ||
+        sanitizedId
+      ).trim();
+      const credentialHash = await hashCredential(secretPassword);
+
+      const realTeamName = !this.isGenericTeamName(sanitizedName, sanitizedId)
+        ? sanitizedName
+        : (sanitizedName || `Team ${sanitizedId}`).trim();
+
+      const rawLead = cleanQuotes(r.teamLeadName);
+      const realLead =
+        rawLead &&
+        rawLead.toLowerCase() !== 'team lead' &&
+        rawLead.toLowerCase() !== 'leader' &&
+        rawLead.toLowerCase() !== 'team lead name'
+          ? rawLead
+          : r.members?.[0] ? cleanQuotes(r.members[0]) : '';
+
+      const cleanMembers = (r.members && r.members.length > 0 ? r.members : [])
+        .map((m) => cleanQuotes(m))
+        .filter(
+          (m) =>
+            m &&
+            m.toLowerCase() !== 'team lead' &&
+            m.toLowerCase() !== 'participant institution' &&
+            m.toLowerCase() !== 'members'
+        );
+
+      if (realLead && !cleanMembers.some((m) => m.toLowerCase() === realLead.toLowerCase())) {
+        cleanMembers.unshift(realLead);
+      }
 
       if (existingIndex >= 0) {
         const prev = existing[existingIndex];
-        const secretPassword = (
-          r.password ||
-          r.teamLeadRegistrationNumber ||
-          prev.teamLeadRegistrationNumber ||
-          prev.teamId
-        ).trim();
-        const credentialHash = await hashCredential(secretPassword);
+        const prevCleanMems = (prev.teamMembers || [])
+          .map((m) => cleanQuotes(m))
+          .filter(
+            (m) =>
+              m &&
+              m.toLowerCase() !== 'team lead' &&
+              m.toLowerCase() !== 'participant institution' &&
+              m.toLowerCase() !== 'members'
+          );
 
-        // Extract real team name, real lead name, real members
-        const realTeamName =
-          !this.isGenericTeamName(r.teamName, r.teamId)
-            ? r.teamName.trim()
-            : !this.isGenericTeamName(prev.teamName, prev.teamId)
-            ? prev.teamName.trim()
-            : (r.teamName || prev.teamName || `Team ${r.teamId}`).trim();
-
-        const realLead =
-          r.teamLeadName &&
-          r.teamLeadName.toLowerCase() !== 'team lead' &&
-          r.teamLeadName.toLowerCase() !== 'leader' &&
-          r.teamLeadName.toLowerCase() !== 'team lead name'
-            ? r.teamLeadName.trim()
-            : prev.teamLeadName && prev.teamLeadName.toLowerCase() !== 'team lead'
-            ? prev.teamLeadName
-            : r.members?.[0] || '';
-
-        const cleanMembers = (r.members && r.members.length > 0 ? r.members : prev.teamMembers || [])
-          .filter((m) => m && m.toLowerCase() !== 'team lead' && m.toLowerCase() !== 'participant institution' && m.toLowerCase() !== 'members');
+        const mergedMems = cleanMembers.length > 0 ? cleanMembers : prevCleanMems;
+        const bestLeadName = realLead || prev.teamLeadName || mergedMems[0] || '';
+        if (bestLeadName && !mergedMems.some((m) => m.toLowerCase() === bestLeadName.toLowerCase())) {
+          mergedMems.unshift(bestLeadName);
+        }
 
         const updated: TeamRecord = {
           ...prev,
-          teamId: r.teamId?.trim() || prev.teamId,
-          teamName: realTeamName,
-          teamLeadName: realLead,
+          teamId: sanitizedId || prev.teamId,
+          teamName: realTeamName && !this.isGenericTeamName(realTeamName, sanitizedId) ? realTeamName : prev.teamName || realTeamName,
+          teamLeadName: bestLeadName,
           teamLeadRegistrationNumber:
             r.teamLeadRegistrationNumber?.trim() || prev.teamLeadRegistrationNumber,
           credentialHash,
-          teamMembers: cleanMembers.length > 0 ? cleanMembers : realLead ? [realLead] : [],
+          teamMembers: mergedMems,
           email: r.email?.trim() || prev.email,
           phone: r.phone?.trim() || prev.phone,
           college:
@@ -613,71 +645,54 @@ export class TeamService {
         }
 
         updatedCount++;
-        continue;
-      }
+      } else {
+        const assignedId =
+          sanitizedId ||
+          `TM-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`;
 
-      const assignedId =
-        r.teamId?.trim() ||
-        `TM-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`;
+        const record: TeamRecord = {
+          teamId: assignedId,
+          teamName: realTeamName || `Team ${assignedId}`,
+          teamLeadName: realLead || cleanMembers[0] || '',
+          teamLeadRegistrationNumber: r.teamLeadRegistrationNumber?.trim() || '',
+          credentialHash,
+          teamMembers: cleanMembers,
+          email: r.email?.trim() || '',
+          phone: r.phone?.trim() || '',
+          college:
+            r.college?.trim() && r.college.toLowerCase() !== 'participant institution'
+              ? r.college.trim()
+              : '',
+          status: 'active',
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        };
 
-      const secretPassword = (
-        r.password ||
-        r.teamLeadRegistrationNumber ||
-        assignedId
-      ).trim();
-      const credentialHash = await hashCredential(secretPassword);
+        newRecords.push(record);
+        existing.push(record);
 
-      const realTeamName =
-        !this.isGenericTeamName(r.teamName, assignedId)
-          ? r.teamName.trim()
-          : (r.teamName || `Team ${assignedId}`).trim();
-
-      const realLead =
-        r.teamLeadName &&
-        r.teamLeadName.toLowerCase() !== 'team lead' &&
-        r.teamLeadName.toLowerCase() !== 'leader' &&
-        r.teamLeadName.toLowerCase() !== 'team lead name'
-          ? r.teamLeadName.trim()
-          : r.members?.[0] || '';
-
-      const cleanMembers = (r.members || []).filter(
-        (m) => m && m.toLowerCase() !== 'team lead' && m.toLowerCase() !== 'participant institution' && m.toLowerCase() !== 'members'
-      );
-
-      const record: TeamRecord = {
-        teamId: assignedId,
-        teamName: realTeamName,
-        teamLeadName: realLead,
-        teamLeadRegistrationNumber: r.teamLeadRegistrationNumber?.trim() || '',
-        credentialHash,
-        teamMembers: cleanMembers.length > 0 ? cleanMembers : realLead ? [realLead] : [],
-        email: r.email?.trim() || '',
-        phone: r.phone?.trim() || '',
-        college: r.college?.trim() && r.college.toLowerCase() !== 'participant institution' ? r.college.trim() : '',
-        status: 'active',
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      };
-
-      newRecords.push(record);
-      existing.push(record);
-
-      if (isFirebaseConfigured && db) {
-        try {
-          await setDoc(doc(db, 'teams', record.teamId), record);
-          await setDoc(doc(db, 'participants', customId), record);
-        } catch (err) {
-          console.warn('[TeamService] Firestore save error:', err);
+        if (isFirebaseConfigured && db) {
+          try {
+            await setDoc(doc(db, 'teams', record.teamId), record);
+            await setDoc(doc(db, 'participants', customId), record);
+          } catch (err) {
+            console.warn('[TeamService] Firestore save error:', err);
+          }
         }
       }
     }
+
+    // Natural sort existing by teamId
+    existing.sort((a, b) =>
+      a.teamId.localeCompare(b.teamId, undefined, { numeric: true, sensitivity: 'base' })
+    );
 
     // Update local cache for both teams and participants
     this.saveLocalTeams(existing);
     this.saveLocalParticipants(existing);
 
     return {
-      importedCount: newRecords.length,
+      importedCount: newRecords.length + updatedCount,
       updatedCount,
       skippedCount: rows.length - (newRecords.length + updatedCount),
       errors,
