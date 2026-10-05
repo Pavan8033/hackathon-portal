@@ -432,14 +432,13 @@ export const ProblemDetailPage: React.FC = () => {
               </span>
 
               {/* Category */}
-              <Badge variant="subtle" size="md">
-                {problem.category}
-              </Badge>
-
-              {/* Difficulty */}
-              <span className="text-xs font-semibold px-2.5 py-1 rounded bg-gray-100 text-gray-700">
-                Difficulty: {problem.difficulty}
-              </span>
+              {problem.category &&
+                problem.category.toLowerCase() !== 'general innovation' &&
+                problem.category.toLowerCase() !== 'general' && (
+                  <Badge variant="subtle" size="md">
+                    {problem.category}
+                  </Badge>
+                )}
             </div>
 
             <div className="flex items-center gap-2">
@@ -469,19 +468,32 @@ export const ProblemDetailPage: React.FC = () => {
             </p>
 
             {/* Tags if available */}
-            {problem.tags && problem.tags.length > 0 && (
-              <div className="mt-4 flex flex-wrap items-center gap-1.5 pt-2">
-                <Tag className="w-3.5 h-3.5 text-[#667085] mr-1" />
-                {problem.tags.map((tag, idx) => (
-                  <span
-                    key={idx}
-                    className="text-xs font-medium text-[#4B5563] bg-[#F7F5EF] px-2.5 py-1 rounded-md border border-[#E5E7EB]"
-                  >
-                    #{tag}
-                  </span>
-                ))}
-              </div>
-            )}
+            {problem.tags &&
+              problem.tags.filter(
+                (t) =>
+                  t &&
+                  t.toLowerCase() !== 'general innovation' &&
+                  t.toLowerCase() !== 'general'
+              ).length > 0 && (
+                <div className="mt-4 flex flex-wrap items-center gap-1.5 pt-2">
+                  <Tag className="w-3.5 h-3.5 text-[#667085] mr-1" />
+                  {problem.tags
+                    .filter(
+                      (t) =>
+                        t &&
+                        t.toLowerCase() !== 'general innovation' &&
+                        t.toLowerCase() !== 'general'
+                    )
+                    .map((tag, idx) => (
+                      <span
+                        key={idx}
+                        className="text-xs font-medium text-[#4B5563] bg-[#F7F5EF] px-2.5 py-1 rounded-md border border-[#E5E7EB]"
+                      >
+                        #{tag}
+                      </span>
+                    ))}
+                </div>
+              )}
           </div>
         </div>
 
@@ -1154,9 +1166,11 @@ export const ProblemDetailPage: React.FC = () => {
                   </div>
 
                   <div className="mt-6 pt-4 border-t border-[#F3F4F6] flex items-center justify-between">
-                    <span className="text-xs text-[#667085]">
-                      {rel.fileName ? 'Attachment available' : 'Online brief'}
-                    </span>
+                    <div>
+                      {rel.fileName && (
+                        <span className="text-xs text-[#667085]">Attachment available</span>
+                      )}
+                    </div>
                     <Link
                       to={`/participant/problem/${rel.problemId}`}
                       className="text-xs font-bold text-[#164A36] hover:text-[#0E3324] inline-flex items-center gap-1 group-hover:translate-x-0.5 transition-transform"

@@ -219,7 +219,7 @@ export const TeamProfilePage: React.FC = () => {
               </span>
               <span className="text-xs font-medium text-[#111827] mt-1.5 block truncate flex items-center gap-1.5">
                 <Mail className="w-3.5 h-3.5 text-[#667085] shrink-0" />
-                <span>{currentTeam?.email || `${(teamId || 'team').toLowerCase()}@hackathon.org`}</span>
+                <span>{currentTeam?.email || '—'}</span>
               </span>
             </div>
 
@@ -230,7 +230,7 @@ export const TeamProfilePage: React.FC = () => {
               </span>
               <span className="text-xs font-medium text-[#111827] mt-1.5 block flex items-center gap-1.5">
                 <Phone className="w-3.5 h-3.5 text-[#667085] shrink-0" />
-                <span>{currentTeam?.phone || 'Provided via Registration'}</span>
+                <span>{currentTeam?.phone || '—'}</span>
               </span>
             </div>
           </div>

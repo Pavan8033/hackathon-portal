@@ -600,7 +600,7 @@ function validateAndNormalizeParticipantRows(rows) {
       teamLeadName,
       teamMembers: cleanMembers,
       teamLeadRegistrationNumber: teamLeadReg,
-      college: college && college.toLowerCase() !== 'participant institution' ? college : 'Participant Institution',
+      college: college && college.toLowerCase() !== 'participant institution' ? college : '',
       password: password || teamLeadReg,
     });
   });
@@ -700,11 +700,11 @@ function parseProblemsFromPDFText(fullText) {
       title = title.replace(/^[-—–:]\s*/, '').replace(/[-—–:]\s*$/, '').replace(/\s+/g, ' ').trim();
 
       const catMatch = chunk.match(/(?:Category|Domain|Track|Theme|Field)[:\s]+(.*?)(?=\s*Difficulty:|\s*Level:|\s*Problem Description|\s*Description:|\s*Expected|\s*Evaluation:|\n|$)/is);
-      let category = catMatch ? catMatch[1].trim() : 'General Innovation';
+      let category = catMatch ? catMatch[1].trim() : 'General';
       if (category.toLowerCase().includes('difficulty:')) {
         category = category.split(/difficulty:/i)[0].trim();
       }
-      category = category.replace(/[-—–:]\s*$/, '').trim() || 'General Innovation';
+      category = category.replace(/[-—–:]\s*$/, '').trim() || 'General';
 
       const diffMatch = chunk.match(/(?:Difficulty|Level|Complexity)[:\s]+(.*?)(?=\s*Category:|\s*Problem Description|\s*Description:|\s*Suggested|\s*Evaluation:|\n|$)/is);
       let difficulty = 'Intermediate';

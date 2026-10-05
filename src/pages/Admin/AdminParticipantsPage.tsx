@@ -540,8 +540,11 @@ export const AdminParticipantsPage: React.FC = () => {
                           className="hover:underline text-[#164A36] font-semibold"
                         >
                           {t.teamId}
-                        </Link>{' '}
-                        • {t.college}
+                        </Link>
+                        {t.college &&
+                          t.college.toLowerCase() !== 'participant institution' && (
+                            <span> • {t.college}</span>
+                          )}
                       </div>
                     </td>
 
@@ -918,12 +921,32 @@ export const AdminParticipantsPage: React.FC = () => {
                 )}
               </div>
 
-              <div className="p-3 rounded-xl bg-gray-50 text-xs text-[#667085] space-y-1">
-                <div><strong>Email:</strong> {selectedTeam.email || 'Not specified'}</div>
-                <div><strong>Phone:</strong> {selectedTeam.phone || 'Not specified'}</div>
-                <div><strong>Institution / College:</strong> {selectedTeam.college || 'Not specified'}</div>
-                <div><strong>Record Created:</strong> {new Date(selectedTeam.createdAt).toLocaleDateString()}</div>
-              </div>
+              {(selectedTeam.email ||
+                selectedTeam.phone ||
+                (selectedTeam.college &&
+                  selectedTeam.college.toLowerCase() !==
+                    'participant institution')) && (
+                <div className="p-3 rounded-xl bg-gray-50 text-xs text-[#667085] space-y-1">
+                  {selectedTeam.email && (
+                    <div>
+                      <strong>Email:</strong> {selectedTeam.email}
+                    </div>
+                  )}
+                  {selectedTeam.phone && (
+                    <div>
+                      <strong>Phone:</strong> {selectedTeam.phone}
+                    </div>
+                  )}
+                  {selectedTeam.college &&
+                    selectedTeam.college.toLowerCase() !==
+                      'participant institution' && (
+                      <div>
+                        <strong>Institution / College:</strong>{' '}
+                        {selectedTeam.college}
+                      </div>
+                    )}
+                </div>
+              )}
             </div>
 
             <div className="flex gap-2">

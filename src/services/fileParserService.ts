@@ -977,9 +977,10 @@ export class FileParserService {
         teamLeadRegistrationNumber: teamLeadReg,
         password,
         members: cleanMembers.map((m) => cleanQuotes(m)),
-        email: email || `${teamId.toLowerCase().replace(/[^a-z0-9]/g, '')}@hackathon.local`,
-        phone: phone || '+91 90000 00000',
-        college: college && college.toLowerCase() !== 'participant institution' ? college : 'Participant Institution',
+        email: email || '',
+        phone: phone || '',
+        college:
+          college && college.toLowerCase() !== 'participant institution' ? college : '',
         isValid: errors.length === 0,
         errors,
       };
@@ -1132,11 +1133,7 @@ export class FileParserService {
 
       // Default category if not given
       if (!category) {
-        category = 'General Innovation';
-      }
-
-      if (tags.length === 0) {
-        tags.push(category);
+        category = 'General';
       }
 
       // Validation
@@ -1421,11 +1418,11 @@ export class FileParserService {
 
         // 3. Category
         const catMatch = chunk.match(/(?:Category|Domain|Track|Theme|Field)[:\s]+(.*?)(?=\s*Difficulty:|\s*Level:|\s*Problem Description|\s*Description:|\s*Expected|\s*Evaluation:|\n|$)/is);
-        let category = catMatch ? catMatch[1].trim() : 'General Innovation';
+        let category = catMatch ? catMatch[1].trim() : 'General';
         if (category.toLowerCase().includes('difficulty:')) {
           category = category.split(/difficulty:/i)[0].trim();
         }
-        category = category.replace(/[-—–:]\s*$/, '').trim() || 'General Innovation';
+        category = category.replace(/[-—–:]\s*$/, '').trim() || 'General';
 
         // 4. Difficulty
         const diffMatch = chunk.match(/(?:Difficulty|Level|Complexity)[:\s]+(.*?)(?=\s*Category:|\s*Problem Description|\s*Description:|\s*Suggested|\s*Evaluation:|\n|$)/is);
@@ -1505,7 +1502,7 @@ export class FileParserService {
         const firstLine = lines[0];
         const title = firstLine.slice(0, 120);
         const desc = lines.slice(1).join('\n') || para;
-        let category = 'General Innovation';
+        let category = 'General';
 
         const catMatch = para.match(/(?:category|domain|track|theme)[:\s]+([^\n.,;]+)/i);
         if (catMatch && catMatch[1]) {

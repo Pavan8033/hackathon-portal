@@ -748,7 +748,7 @@ export class TeamService {
           teamLeadRegistrationNumber: cleanReg,
           credentialHash,
           teamMembers: [],
-          email: `${cleanId.toLowerCase().replace(/[^a-z0-9]/g, '')}@hackathon.local`,
+          email: '',
           phone: '',
           college: '',
           status: 'active',

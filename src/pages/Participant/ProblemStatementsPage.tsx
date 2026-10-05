@@ -167,7 +167,7 @@ export const ProblemStatementsPage: React.FC = () => {
   // Helper for document availability badge
   const renderDocBadge = (prob: ProblemRecord) => {
     if (!prob.fileName && !prob.fileUrl) {
-      return <span className="text-xs text-[#9CA3AF]">Online Brief</span>;
+      return null;
     }
     const docInfo = getDocumentTypeInfo(prob.fileName, prob.fileType);
     let Icon = FileCheck;
@@ -670,13 +670,6 @@ export const ProblemStatementsPage: React.FC = () => {
           /* Problem Cards Grid */
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredProblems.map((prob) => {
-              const difficultyVariants: Record<string, string> = {
-                Beginner: 'bg-emerald-50 text-emerald-800 border-emerald-200',
-                Intermediate: 'bg-blue-50 text-blue-800 border-blue-200',
-                Advanced: 'bg-rose-50 text-rose-800 border-rose-200',
-              };
-              const diffBadgeClass = difficultyVariants[prob.difficulty] || 'bg-gray-100 text-gray-800 border-gray-200';
-
               return (
                 <div
                   key={prob.problemId}
@@ -688,9 +681,13 @@ export const ProblemStatementsPage: React.FC = () => {
                       <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-[#EEF5F0] text-[#164A36] border border-[#D5E6DB]">
                         {prob.problemId}
                       </span>
-                      <Badge variant="subtle" size="sm">
-                        {prob.category}
-                      </Badge>
+                      {prob.category &&
+                        prob.category.toLowerCase() !== 'general innovation' &&
+                        prob.category.toLowerCase() !== 'general' && (
+                          <Badge variant="subtle" size="sm">
+                            {prob.category}
+                          </Badge>
+                        )}
                     </div>
 
                     {/* Title */}
@@ -706,32 +703,43 @@ export const ProblemStatementsPage: React.FC = () => {
                     </p>
 
                     {/* Tags preview */}
-                    {prob.tags && prob.tags.length > 0 && (
-                      <div className="flex flex-wrap gap-1 pt-1">
-                        {prob.tags.slice(0, 3).map((tag, idx) => (
-                          <span
-                            key={idx}
-                            className="text-[10px] text-[#667085] bg-gray-50 px-2 py-0.5 rounded border border-gray-100"
-                          >
-                            #{tag}
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                    {prob.tags &&
+                      prob.tags.filter(
+                        (t) =>
+                          t &&
+                          t.toLowerCase() !== 'general innovation' &&
+                          t.toLowerCase() !== 'general'
+                      ).length > 0 && (
+                        <div className="flex flex-wrap gap-1 pt-1">
+                          {prob.tags
+                            .filter(
+                              (t) =>
+                                t &&
+                                t.toLowerCase() !== 'general innovation' &&
+                                t.toLowerCase() !== 'general'
+                            )
+                            .slice(0, 3)
+                            .map((tag, idx) => (
+                              <span
+                                key={idx}
+                                className="text-[10px] text-[#667085] bg-gray-50 px-2 py-0.5 rounded border border-gray-100"
+                              >
+                                #{tag}
+                              </span>
+                            ))}
+                        </div>
+                      )}
                   </div>
 
                   {/* Card Footer */}
                   <div className="pt-4 mt-4 border-t border-[#F3F4F6] flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${diffBadgeClass}`}>
-                        {prob.difficulty}
-                      </span>
+                    <div>
                       {renderDocBadge(prob)}
                     </div>
 
                     <Link
                       to={`/participant/problem/${prob.problemId}`}
-                      className="inline-flex items-center gap-1 text-xs font-bold text-[#164A36] hover:text-[#0E3324] group-hover:translate-x-0.5 transition-all"
+                      className="inline-flex items-center gap-1 text-xs font-bold text-[#164A36] hover:text-[#0E3324] group-hover:translate-x-0.5 transition-all ml-auto"
                     >
                       <span>VIEW BRIEF</span>
                       <ArrowRight className="w-3.5 h-3.5" />
